@@ -1,1 +1,7 @@
 .vscode/settings.json
+
+# Godot project generated content
+frontend/.godot/
+frontend/.import/
+frontend/.mono/
+frontend/export_presets.cfg
