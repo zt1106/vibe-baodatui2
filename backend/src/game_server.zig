@@ -11,9 +11,38 @@ pub const Config = struct {
     port: u16 = 7998,
     handshake_timeout: u32 = 5,
     max_message_size: u16 = 1024,
+    thread_pool_count: ?u16 = null,
 };
 
-pub fn run(game_app: *app.GameApp, allocator: std.mem.Allocator, config: Config) !void {
+pub const Instance = struct {
+    server: ws.Server(Handler),
+    thread: std.Thread,
+    ctx: *HandlerContext,
+    allocator: std.mem.Allocator,
+
+    pub fn wait(self: *Instance) void {
+        self.thread.join();
+    }
+
+    pub fn stop(self: *Instance) void {
+        self.server.stop();
+        self.thread.join();
+    }
+
+    pub fn deinit(self: *Instance) void {
+        self.server.deinit();
+        self.allocator.destroy(self.ctx);
+    }
+};
+
+pub fn start(game_app: *app.GameApp, allocator: std.mem.Allocator, config: Config) !Instance {
+    const ctx = try allocator.create(HandlerContext);
+    ctx.* = .{
+        .allocator = allocator,
+        .app = game_app,
+    };
+    errdefer allocator.destroy(ctx);
+
     var server = try ws.Server(Handler).init(allocator, .{
         .port = config.port,
         .address = config.address,
@@ -22,16 +51,28 @@ pub fn run(game_app: *app.GameApp, allocator: std.mem.Allocator, config: Config)
             .max_size = config.max_message_size,
             .max_headers = 0,
         },
+        .thread_pool = .{
+            .count = config.thread_pool_count,
+        },
     });
-    defer server.deinit();
+    errdefer server.deinit();
 
-    var ctx = HandlerContext{
+    const thread = try server.listenInNewThread(ctx);
+
+    return .{
+        .server = server,
+        .thread = thread,
+        .ctx = ctx,
         .allocator = allocator,
-        .app = game_app,
     };
+}
+
+pub fn run(game_app: *app.GameApp, allocator: std.mem.Allocator, config: Config) !void {
+    var instance = try start(game_app, allocator, config);
+    defer instance.deinit();
 
     log.info("starting websocket server on {s}:{d}", .{ config.address, config.port });
-    try server.listen(&ctx);
+    instance.wait();
 }
 
 const HandlerContext = struct {
