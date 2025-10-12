@@ -2,6 +2,8 @@ const std = @import("std");
 const websocket = @import("websocket");
 
 const messages = @import("messages.zig");
+const app = @import("app.zig");
+const game_server = @import("game_server.zig");
 
 const ws_client = websocket.Client;
 
@@ -9,7 +11,107 @@ pub const ClientError = error{
     ConnectionClosed,
     UnexpectedBinaryPayload,
     UnexpectedMessageType,
+    Timeout,
 };
+
+test "ws_test_client connects and handles ping" {
+    try withReadyClient(22001, struct {
+        fn run(ctx: *IntegrationContext) !void {
+            try ctx.client.sendMessage("ping", messages.PingPayload{});
+
+            var response = try ctx.client.expect(ctx.allocator, 2000, "response");
+            defer response.deinit();
+            const payload = try response.payloadAs(messages.ResponseEnvelope(messages.SystemPayload));
+            try std.testing.expectEqualStrings("ping", payload.request);
+            try std.testing.expectEqualStrings("pong", payload.data.code);
+        }
+    }.run);
+}
+
+const IntegrationContext = struct {
+    allocator: std.mem.Allocator,
+    game_app: *app.GameApp,
+    server: game_server.Instance,
+    client: TestClient,
+
+    fn deinit(self: *IntegrationContext) void {
+        self.client.close();
+        self.client.deinit();
+        self.server.stop();
+        self.server.deinit();
+        self.game_app.deinit();
+        self.allocator.destroy(self.game_app);
+        self.* = undefined;
+    }
+};
+
+fn setupServerAndClient(allocator: std.mem.Allocator, port: u16) !IntegrationContext {
+    const game_app = try allocator.create(app.GameApp);
+    errdefer allocator.destroy(game_app);
+
+    game_app.* = try app.GameApp.init(allocator);
+    errdefer game_app.deinit();
+
+    var server = try game_server.start(game_app, allocator, .{
+        .address = "127.0.0.1",
+        .port = port,
+        .handshake_timeout = 5,
+        .max_message_size = 2048,
+        .thread_pool_count = 1,
+    });
+    errdefer {
+        server.stop();
+        server.deinit();
+    }
+
+    var client = try TestClient.connect(allocator, .{
+        .host = "127.0.0.1",
+        .port = port,
+        .path = "/",
+        .handshake_timeout_ms = 2000,
+    });
+    errdefer {
+        client.close();
+        client.deinit();
+    }
+
+    return IntegrationContext{
+        .allocator = allocator,
+        .game_app = game_app,
+        .server = server,
+        .client = client,
+    };
+}
+
+fn withReadyClient(port: u16, callback: anytype) !void {
+    var original_dir = try std.fs.cwd().openDir(".", .{});
+    defer original_dir.close();
+
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    try tmp_dir.dir.setAsCwd();
+    defer original_dir.setAsCwd() catch {};
+
+    const allocator = std.testing.allocator;
+    var ctx = try setupReadyClient(allocator, port);
+    errdefer ctx.deinit();
+
+    try callback(&ctx);
+    ctx.deinit();
+}
+
+fn setupReadyClient(allocator: std.mem.Allocator, port: u16) !IntegrationContext {
+    var ctx = try setupServerAndClient(allocator, port);
+    errdefer ctx.deinit();
+
+    var welcome = try ctx.client.expect(allocator, 2000, "system");
+    defer welcome.deinit();
+    const welcome_payload = try welcome.payloadAs(messages.SystemPayload);
+    try std.testing.expectEqualStrings("connected", welcome_payload.code);
+
+    return ctx;
+}
 
 pub const TestClient = struct {
     allocator: std.mem.Allocator,
@@ -65,15 +167,32 @@ pub const TestClient = struct {
         try self.client.write(copy);
     }
 
-    pub fn receive(
+    fn receiveWithDeadline(
         self: *TestClient,
         allocator: std.mem.Allocator,
-        timeout_ms: u32,
-    ) (ClientError || anyerror)!messages.Message {
-        try self.client.readTimeout(timeout_ms);
-
+        deadline_ms: i128,
+    ) (ClientError || error{Timeout} || anyerror)!messages.Message {
         while (true) {
-            const maybe = try self.client.read();
+            const now = std.time.milliTimestamp();
+            if (now >= deadline_ms) return error.Timeout;
+
+            const remaining_ms = @as(u64, @intCast(deadline_ms - now));
+            const wait_ms = if (remaining_ms > @as(u64, std.math.maxInt(u32)))
+                std.math.maxInt(u32)
+            else
+                @as(u32, @intCast(remaining_ms));
+
+            try self.client.readTimeout(wait_ms);
+
+            const maybe = self.client.read() catch |err| switch (err) {
+                error.WouldBlock => {
+                    std.Thread.sleep(std.time.ns_per_ms);
+                    continue;
+                },
+                error.ConnectionResetByPeer, error.Closed => return error.ConnectionClosed,
+                else => return err,
+            };
+
             if (maybe) |frame| {
                 defer self.client.done(frame);
                 switch (frame.type) {
@@ -88,10 +207,19 @@ pub const TestClient = struct {
                     },
                     .pong => continue,
                 }
-            } else {
-                try self.client.readTimeout(timeout_ms);
             }
         }
+    }
+
+    pub fn receive(
+        self: *TestClient,
+        allocator: std.mem.Allocator,
+        timeout_ms: u32,
+    ) (ClientError || anyerror)!messages.Message {
+        const deadline = std.time.milliTimestamp() + @as(i128, timeout_ms);
+        return self.receiveWithDeadline(allocator, deadline) catch |err| switch (err) {
+            error.Timeout => ClientError.Timeout,
+        };
     }
 
     pub fn expect(
@@ -100,12 +228,18 @@ pub const TestClient = struct {
         timeout_ms: u32,
         type_name: []const u8,
     ) (ClientError || anyerror)!messages.Message {
-        while (true) {
-            var message = try self.receive(allocator, timeout_ms);
-            if (std.mem.eql(u8, message.typeName(), type_name)) {
-                return message;
-            }
+        const deadline = std.time.milliTimestamp() + @as(i128, timeout_ms);
+
+        var message = self.receiveWithDeadline(allocator, deadline) catch |err| switch (err) {
+            error.Timeout => return error.Timeout,
+            else => return err,
+        };
+
+        if (!std.mem.eql(u8, message.typeName(), type_name)) {
             message.deinit();
+            return error.UnexpectedMessageType;
         }
+
+        return message;
     }
 };

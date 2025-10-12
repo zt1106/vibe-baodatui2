@@ -37,12 +37,6 @@ pub const Instance = struct {
     }
 };
 
-fn serverThread(server: *ws.Server(Handler), ctx: *HandlerContext) void {
-    server.listen(ctx) catch |err| {
-        log.err("server listen error: {}", .{err});
-    };
-}
-
 pub fn start(game_app: *app.GameApp, allocator: std.mem.Allocator, config: Config) !Instance {
     const ctx = try allocator.create(HandlerContext);
     ctx.* = .{
@@ -68,31 +62,7 @@ pub fn start(game_app: *app.GameApp, allocator: std.mem.Allocator, config: Confi
     });
     errdefer server_ptr.deinit();
 
-    const thread = try std.Thread.spawn(.{}, serverThread, .{ server_ptr, ctx });
-
-    const connect_deadline = std.time.milliTimestamp() + 2000;
-    var ready = false;
-    while (std.time.milliTimestamp() < connect_deadline) {
-        const stream = std.net.tcpConnectToHost(allocator, config.address, config.port) catch |err| switch (err) {
-            error.ConnectionRefused, error.NetworkUnreachable, error.NetworkSubsystemFailed => {
-                std.Thread.sleep(10 * std.time.ns_per_ms);
-                continue;
-            },
-            else => return err,
-        };
-        defer stream.close();
-        ready = true;
-        break;
-    }
-
-    if (!ready) {
-        server_ptr.stop();
-        thread.join();
-        server_ptr.deinit();
-        allocator.destroy(server_ptr);
-        allocator.destroy(ctx);
-        return error.ServerStartTimedOut;
-    }
+    const thread = try server_ptr.listenInNewThread(ctx);
 
     return .{
         .server = server_ptr,
