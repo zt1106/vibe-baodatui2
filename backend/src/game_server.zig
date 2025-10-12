@@ -3,6 +3,7 @@ const ws = @import("websocket");
 
 const messages = @import("messages.zig");
 const app = @import("app.zig");
+const ws_test_client = @import("ws_test_client.zig");
 
 const log = std.log.scoped(.game_server);
 
@@ -15,7 +16,7 @@ pub const Config = struct {
 };
 
 pub const Instance = struct {
-    server: ws.Server(Handler),
+    server: *ws.Server(Handler),
     thread: std.Thread,
     ctx: *HandlerContext,
     allocator: std.mem.Allocator,
@@ -31,9 +32,16 @@ pub const Instance = struct {
 
     pub fn deinit(self: *Instance) void {
         self.server.deinit();
+        self.allocator.destroy(self.server);
         self.allocator.destroy(self.ctx);
     }
 };
+
+fn serverThread(server: *ws.Server(Handler), ctx: *HandlerContext) void {
+    server.listen(ctx) catch |err| {
+        log.err("server listen error: {}", .{err});
+    };
+}
 
 pub fn start(game_app: *app.GameApp, allocator: std.mem.Allocator, config: Config) !Instance {
     const ctx = try allocator.create(HandlerContext);
@@ -43,7 +51,10 @@ pub fn start(game_app: *app.GameApp, allocator: std.mem.Allocator, config: Confi
     };
     errdefer allocator.destroy(ctx);
 
-    var server = try ws.Server(Handler).init(allocator, .{
+    const server_ptr = try allocator.create(ws.Server(Handler));
+    errdefer allocator.destroy(server_ptr);
+
+    server_ptr.* = try ws.Server(Handler).init(allocator, .{
         .port = config.port,
         .address = config.address,
         .handshake = .{
@@ -55,12 +66,36 @@ pub fn start(game_app: *app.GameApp, allocator: std.mem.Allocator, config: Confi
             .count = config.thread_pool_count,
         },
     });
-    errdefer server.deinit();
+    errdefer server_ptr.deinit();
 
-    const thread = try server.listenInNewThread(ctx);
+    const thread = try std.Thread.spawn(.{}, serverThread, .{ server_ptr, ctx });
+
+    const connect_deadline = std.time.milliTimestamp() + 2000;
+    var ready = false;
+    while (std.time.milliTimestamp() < connect_deadline) {
+        const stream = std.net.tcpConnectToHost(allocator, config.address, config.port) catch |err| switch (err) {
+            error.ConnectionRefused, error.NetworkUnreachable, error.NetworkSubsystemFailed => {
+                std.Thread.sleep(10 * std.time.ns_per_ms);
+                continue;
+            },
+            else => return err,
+        };
+        defer stream.close();
+        ready = true;
+        break;
+    }
+
+    if (!ready) {
+        server_ptr.stop();
+        thread.join();
+        server_ptr.deinit();
+        allocator.destroy(server_ptr);
+        allocator.destroy(ctx);
+        return error.ServerStartTimedOut;
+    }
 
     return .{
-        .server = server,
+        .server = server_ptr,
         .thread = thread,
         .ctx = ctx,
         .allocator = allocator,
@@ -127,3 +162,106 @@ const Handler = struct {
         try self.conn.write(frame);
     }
 };
+
+fn withTempDir(action: anytype) !void {
+    var original_dir = try std.fs.cwd().openDir(".", .{});
+    defer original_dir.close();
+
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    try tmp_dir.dir.setAsCwd();
+    defer original_dir.setAsCwd() catch {};
+
+    try action();
+}
+
+test "game_server sends welcome message on connect" {
+    try withTempDir(struct {
+        fn run() !void {
+            const allocator = std.testing.allocator;
+
+            var game_app = try app.GameApp.init(allocator);
+            defer game_app.deinit();
+
+            const port: u16 = 21001;
+            var server = try start(&game_app, allocator, .{
+                .address = "127.0.0.1",
+                .port = port,
+                .handshake_timeout = 5,
+                .max_message_size = 2048,
+                .thread_pool_count = 1,
+            });
+            defer {
+                server.stop();
+                server.deinit();
+            }
+
+            var client = try ws_test_client.TestClient.connect(allocator, .{
+                .host = "127.0.0.1",
+                .port = port,
+                .path = "/",
+                .handshake_timeout_ms = 2000,
+            });
+            defer {
+                client.close();
+                client.deinit();
+            }
+
+            var welcome = try client.expect(allocator, 2000, "system");
+            defer welcome.deinit();
+
+            const payload = try welcome.payloadAs(messages.SystemPayload);
+            try std.testing.expectEqualStrings("connected", payload.code);
+            try std.testing.expectEqualStrings("Welcome to the game server", payload.message);
+        }
+    }.run);
+}
+
+test "game_server returns system error for unknown message" {
+    try withTempDir(struct {
+        fn run() !void {
+            const allocator = std.testing.allocator;
+
+            var game_app = try app.GameApp.init(allocator);
+            defer game_app.deinit();
+
+            const port: u16 = 21002;
+            var server = try start(&game_app, allocator, .{
+                .address = "127.0.0.1",
+                .port = port,
+                .handshake_timeout = 5,
+                .max_message_size = 2048,
+                .thread_pool_count = 1,
+            });
+            defer {
+                server.stop();
+                server.deinit();
+            }
+
+            var client = try ws_test_client.TestClient.connect(allocator, .{
+                .host = "127.0.0.1",
+                .port = port,
+                .path = "/",
+                .handshake_timeout_ms = 2000,
+            });
+            defer {
+                client.close();
+                client.deinit();
+            }
+
+            var welcome = try client.expect(allocator, 2000, "system");
+            defer welcome.deinit();
+
+            _ = try welcome.payloadAs(messages.SystemPayload);
+
+            try client.sendMessage("unknown_message", .{});
+
+            var response = try client.expect(allocator, 2000, "system");
+            defer response.deinit();
+
+            const payload = try response.payloadAs(messages.SystemPayload);
+            try std.testing.expectEqualStrings("unknown_type", payload.code);
+        }
+    }.run);
+}
