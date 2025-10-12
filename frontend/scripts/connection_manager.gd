@@ -24,10 +24,29 @@ func _process(delta: float) -> void:
 		_elapsed += delta
 		if _elapsed >= timeout_seconds:
 			_connecting = false
-			_client.disconnect_from_host(1000, "timeout")
+			_client.close()
 			emit_signal("connection_failed")
-	if _client.get_ready_state() == WebSocketPeer.STATE_CONNECTING or _client.get_ready_state() == WebSocketPeer.STATE_OPEN:
-		_client.poll()
+	
+	# Always poll the WebSocket to update its state
+	_client.poll()
+	
+	# Check connection state after polling
+	var state = _client.get_ready_state()
+	match state:
+		WebSocketPeer.STATE_CONNECTING:
+			# Still connecting, do nothing
+			pass
+		WebSocketPeer.STATE_OPEN:
+			if _connecting:
+				_on_handshake_completed()
+		WebSocketPeer.STATE_CLOSING:
+			# Connection is closing
+			pass
+		WebSocketPeer.STATE_CLOSED:
+			if _connecting:
+				_on_connection_error()
+			elif _connected:
+				_on_connection_closed()
 
 func _attempt_connection() -> void:
 	_elapsed = 0.0
@@ -37,25 +56,20 @@ func _attempt_connection() -> void:
 		_connecting = false
 		emit_signal("connection_failed")
 		return
-	_client.handshake_completed.connect(_on_handshake_completed)
-	_client.connection_closed.connect(_on_connection_closed)
-	_client.connection_error.connect(_on_connection_error)
 
-func _on_handshake_completed(_protocol: String = "") -> void:
+func _on_handshake_completed() -> void:
 	_connecting = false
 	_connected = true
 	emit_signal("connection_succeeded")
 
-func _on_connection_closed(_was_clean: bool = false) -> void:
-	if not _connected and _connecting:
-		# closed before success (likely refused)
-		_connecting = false
-		emit_signal("connection_failed")
+func _on_connection_closed() -> void:
+	_connected = false
+	# Connection was closed, could implement reconnection logic here
 
 func _on_connection_error() -> void:
-	if _connecting:
-		_connecting = false
-		emit_signal("connection_failed")
+	_connecting = false
+	_connected = false
+	emit_signal("connection_failed")
 
 func _on_connection_failed() -> void:
 	if _error_dialog:

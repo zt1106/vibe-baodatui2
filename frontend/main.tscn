@@ -1,18 +1,7 @@
 [gd_scene load_steps=2 format=3]
 
-[node name="Main" type="Node2D"]
-position = Vector2(0, 0)
+[ext_resource type="PackedScene" path="res://home_page.tscn" id="1"]
 
-[node name="Label" type="Label" parent="."]
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -200.0
-offset_top = -20.0
-offset_right = 200.0
-offset_bottom = 20.0
-text = "Welcome to the Vibe Frontend (Godot 4.5)"
-horizontal_alignment = 1
-vertical_alignment = 1
+[node name="Main" type="Node"]
+
+[node name="HomePage" parent="." instance=ExtResource("1")]
