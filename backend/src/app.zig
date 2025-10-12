@@ -58,7 +58,7 @@ pub const GameApp = struct {
     pub fn onConnect(self: *GameApp, conn: *ws.Conn, state: *ConnectionState) !void {
         _ = state;
         log.info("connection established", .{});
-        try self.sendSystem(conn, .{
+        try self.sendMessage(conn, "system", .{
             .code = "connected",
             .message = "Welcome to the game server",
         });
@@ -82,7 +82,7 @@ pub const GameApp = struct {
         }
 
         log.warn("unknown message type: {s}", .{type_name});
-        try self.sendSystem(conn, .{
+        try self.sendMessage(conn, "system", .{
             .code = "unknown_type",
             .message = "Unrecognized message type",
         });
@@ -160,7 +160,7 @@ pub const GameApp = struct {
         self.mutex.lock();
         if (self.players.contains(name_slice)) {
             self.mutex.unlock();
-            try self.sendSystem(conn, .{
+            try self.sendMessage(conn, "system", .{
                 .code = "name_taken",
                 .message = "That name is already in use",
             });
@@ -183,7 +183,7 @@ pub const GameApp = struct {
         if (previous_name) |old| self.allocator.free(old);
 
         log.info("player joined: {s}", .{name_slice});
-        try self.sendSystem(conn, .{
+        try self.sendMessage(conn, "system", .{
             .code = "joined",
             .message = "You have joined the game",
         });
@@ -196,7 +196,7 @@ pub const GameApp = struct {
         payload: messages.ChatPayload,
     ) !void {
         const player_name = state.name orelse {
-            try self.sendSystem(conn, .{
+            try self.sendMessage(conn, "system", .{
                 .code = "not_joined",
                 .message = "Join the game before chatting",
             });
@@ -205,7 +205,7 @@ pub const GameApp = struct {
 
         log.info("{s} says: {s}", .{ player_name, payload.message });
 
-        try self.sendSystem(conn, .{
+        try self.sendMessage(conn, "system", .{
             .code = "chat_ack",
             .message = "Message received",
         });
@@ -218,7 +218,7 @@ pub const GameApp = struct {
         payload: messages.MovePayload,
     ) !void {
         const player_name = state.name orelse {
-            try self.sendSystem(conn, .{
+            try self.sendMessage(conn, "system", .{
                 .code = "not_joined",
                 .message = "Join the game before moving",
             });
@@ -227,7 +227,7 @@ pub const GameApp = struct {
 
         log.debug("movement from {s}: ({d:.2}, {d:.2})", .{ player_name, payload.x, payload.y });
 
-        try self.sendSystem(conn, .{
+        try self.sendMessage(conn, "system", .{
             .code = "move_ack",
             .message = "Position updated",
         });
@@ -239,18 +239,19 @@ pub const GameApp = struct {
         _: *ConnectionState,
         _: messages.PingPayload,
     ) !void {
-        try self.sendSystem(conn, .{
+        try self.sendMessage(conn, "system", .{
             .code = "pong",
             .message = "Heartbeat ok",
         });
     }
 
-    fn sendSystem(
+    fn sendMessage(
         self: *GameApp,
         conn: *ws.Conn,
-        payload: messages.SystemPayload,
+        type_name: []const u8,
+        payload: anytype,
     ) !void {
-        const frame = try messages.encodeMessage(self.allocator, "system", payload);
+        const frame = try messages.encodeMessage(self.allocator, type_name, payload);
         defer self.allocator.free(frame);
         try conn.write(frame);
     }
