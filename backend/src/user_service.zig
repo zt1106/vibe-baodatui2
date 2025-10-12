@@ -1,6 +1,6 @@
 const std = @import("std");
-const sqlite = @import("sqlite.zig");
 const messages = @import("messages.zig");
+const ws_test_client = @import("ws_test_client.zig");
 
 pub const Error = error{
     UserExists,
@@ -12,31 +12,41 @@ pub const User = struct {
     id: i64,
 };
 
+const Entry = struct {
+    id: i64,
+    name_storage: []u8,
+};
+
 pub const Service = struct {
     allocator: std.mem.Allocator,
-    db: *sqlite.Database,
+    users: std.StringHashMap(Entry),
+    next_id: i64,
 
-    pub fn init(allocator: std.mem.Allocator, db: *sqlite.Database) Service {
+    pub fn init(allocator: std.mem.Allocator) Service {
         return .{
             .allocator = allocator,
-            .db = db,
+            .users = std.StringHashMap(Entry).init(allocator),
+            .next_id = 1,
         };
     }
 
-    pub fn ensureSchema(self: *Service) !void {
-        try self.db.exec(
-            \\CREATE TABLE IF NOT EXISTS users(
-            \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
-            \\    username TEXT NOT NULL UNIQUE
-            \\);
-        );
+    pub fn deinit(self: *Service) void {
+        var it = self.users.iterator();
+        while (it.next()) |entry| {
+            self.allocator.free(entry.value_ptr.*.name_storage);
+        }
+        self.users.deinit();
+    }
+
+    pub fn ensureSchema(self: *Service) void {
+        _ = self;
     }
 
     pub fn handleRegister(
         self: *Service,
         state: anytype,
         payload: messages.UserRegisterPayload,
-    ) (Error || sqlite.SqliteError || std.mem.Allocator.Error)!messages.UserResponsePayload {
+    ) (Error || std.mem.Allocator.Error)!messages.UserResponsePayload {
         const username = try normalizeUsername(payload.username);
         const user = try self.createUser(username);
         try self.assignToConnection(state, username, user.id);
@@ -50,7 +60,7 @@ pub const Service = struct {
         self: *Service,
         state: anytype,
         payload: messages.UserLoginPayload,
-    ) (Error || sqlite.SqliteError || std.mem.Allocator.Error)!messages.UserResponsePayload {
+    ) (Error || std.mem.Allocator.Error)!messages.UserResponsePayload {
         const username = try normalizeUsername(payload.username);
         const user = try self.fetchUser(username);
         try self.assignToConnection(state, username, user.id);
@@ -63,7 +73,7 @@ pub const Service = struct {
     pub fn handleGet(
         self: *Service,
         payload: messages.UserGetPayload,
-    ) (Error || sqlite.SqliteError || std.mem.Allocator.Error)!messages.UserResponsePayload {
+    ) (Error || std.mem.Allocator.Error)!messages.UserResponsePayload {
         const username = try normalizeUsername(payload.username);
         const user = try self.fetchUser(username);
         return .{
@@ -76,7 +86,7 @@ pub const Service = struct {
         self: *Service,
         state: anytype,
         payload: messages.UserUpdatePayload,
-    ) (Error || sqlite.SqliteError || std.mem.Allocator.Error)!messages.UserResponsePayload {
+    ) (Error || std.mem.Allocator.Error)!messages.UserResponsePayload {
         const current = try normalizeUsername(payload.username);
         const desired = try normalizeUsername(payload.new_username);
         const user = try self.renameUser(current, desired);
@@ -93,7 +103,7 @@ pub const Service = struct {
         self: *Service,
         state: anytype,
         payload: messages.UserDeletePayload,
-    ) (Error || sqlite.SqliteError || std.mem.Allocator.Error)!messages.UserDeleteResponsePayload {
+    ) (Error || std.mem.Allocator.Error)!messages.UserDeleteResponsePayload {
         const username = try normalizeUsername(payload.username);
         try self.deleteUser(username);
         self.clearConnectionIfMatches(state, username);
@@ -105,84 +115,55 @@ pub const Service = struct {
     fn createUser(
         self: *Service,
         username: []const u8,
-    ) (Error || sqlite.SqliteError || std.mem.Allocator.Error)!User {
-        var stmt = try self.db.prepare(
-            \\INSERT INTO users(username) VALUES (?1);
-        );
-        defer stmt.finalize();
+    ) (Error || std.mem.Allocator.Error)!User {
+        if (self.users.contains(username)) {
+            return Error.UserExists;
+        }
 
-        try stmt.bindText(1, username);
-        stmt.stepExpectDone() catch |err| {
-            if (err == sqlite.SqliteError.StepFailed and self.db.errCode() == sqlite.SQLITE_CONSTRAINT) {
-                return Error.UserExists;
-            }
-            return err;
+        const name_copy = try self.allocator.dupe(u8, username);
+        errdefer self.allocator.free(name_copy);
+
+        const entry = Entry{
+            .id = self.next_id,
+            .name_storage = name_copy,
         };
 
-        return User{ .id = self.db.lastInsertRowId() };
+        try self.users.put(name_copy, entry);
+        self.next_id += 1;
+        return User{ .id = entry.id };
     }
 
     fn fetchUser(
         self: *Service,
         username: []const u8,
-    ) (Error || sqlite.SqliteError || std.mem.Allocator.Error)!User {
-        var stmt = try self.db.prepare(
-            \\SELECT id FROM users WHERE username = ?1;
-        );
-        defer stmt.finalize();
-
-        try stmt.bindText(1, username);
-
-        return switch (try stmt.step()) {
-            .row => User{ .id = stmt.columnInt(0) },
-            .done => Error.UserNotFound,
-        };
+    ) Error!User {
+        const entry = self.users.get(username) orelse return Error.UserNotFound;
+        return User{ .id = entry.id };
     }
 
     fn renameUser(
         self: *Service,
         current: []const u8,
         desired: []const u8,
-    ) (Error || sqlite.SqliteError || std.mem.Allocator.Error)!User {
-        var stmt = try self.db.prepare(
-            \\UPDATE users
-            \\SET username = ?2
-            \\WHERE username = ?1
-            \\RETURNING id;
-        );
-        defer stmt.finalize();
+    ) (Error || std.mem.Allocator.Error)!User {
+        if (self.users.contains(desired)) return Error.UserExists;
 
-        try stmt.bindText(1, current);
-        try stmt.bindText(2, desired);
+        const removed = self.users.fetchRemove(current) orelse return Error.UserNotFound;
+        const new_copy = try self.allocator.dupe(u8, desired);
+        errdefer self.allocator.free(new_copy);
+        self.allocator.free(removed.value.name_storage);
 
-        const result = stmt.step() catch |err| {
-            if (err == sqlite.SqliteError.StepFailed and self.db.errCode() == sqlite.SQLITE_CONSTRAINT) {
-                return Error.UserExists;
-            }
-            return err;
-        };
-
-        return switch (result) {
-            .row => User{ .id = stmt.columnInt(0) },
-            .done => Error.UserNotFound,
-        };
+        const entry = Entry{ .id = removed.value.id, .name_storage = new_copy };
+        try self.users.put(new_copy, entry);
+        return User{ .id = entry.id };
     }
 
     fn deleteUser(
         self: *Service,
         username: []const u8,
-    ) (Error || sqlite.SqliteError || std.mem.Allocator.Error)!void {
-        var stmt = try self.db.prepare(
-            \\DELETE FROM users WHERE username = ?1;
-        );
-        defer stmt.finalize();
-
-        try stmt.bindText(1, username);
-        try stmt.stepExpectDone();
-
-        if (self.db.changes() == 0) {
-            return Error.UserNotFound;
-        }
+    ) Error!void {
+        const removed = self.users.fetchRemove(username) orelse return Error.UserNotFound;
+        self.allocator.free(removed.value.name_storage);
     }
 
     fn assignToConnection(
@@ -272,11 +253,9 @@ fn ensureStatePointer(comptime T: type) void {
 test "user service lifecycle operations" {
     const allocator = std.testing.allocator;
 
-    var db = try sqlite.Database.open(allocator, ":memory:");
-    defer db.close();
-
-    var service = Service.init(allocator, &db);
-    try service.ensureSchema();
+    var service = Service.init(allocator);
+    defer service.deinit();
+    service.ensureSchema();
 
     const TestState = struct {
         user_name: ?[]u8 = null,
@@ -324,3 +303,69 @@ test "user service lifecycle operations" {
     defer if (invalid_state.user_name) |name| allocator.free(name);
     try std.testing.expectError(Error.InvalidUsername, service.handleRegister(&invalid_state, .{ .username = "   " }));
 }
+
+test "integration: user register and login" {
+    try ws_test_client.withReadyClient(22021, struct {
+        fn run(ctx: *ws_test_client.IntegrationContext) !void {
+            const allocator = ctx.allocator;
+
+            try ctx.client.sendMessage("user_register", messages.UserRegisterPayload{ .username = "Alice" });
+            const user_id = try expectUserResponse(allocator, &ctx.client, "user_register", "Alice");
+
+            try ctx.client.sendMessage("user_login", messages.UserLoginPayload{ .username = "Alice" });
+            const login_id = try expectUserResponse(allocator, &ctx.client, "user_login", "Alice");
+            try std.testing.expectEqual(user_id, login_id);
+
+            try ctx.client.sendMessage("user_get", messages.UserGetPayload{ .username = "Alice" });
+            const get_id = try expectUserResponse(allocator, &ctx.client, "user_get", "Alice");
+            try std.testing.expectEqual(user_id, get_id);
+        }
+    }.run);
+}
+
+fn expectUserResponse(
+    allocator: std.mem.Allocator,
+    client: *ws_test_client.TestClient,
+    expected_request: []const u8,
+    expected_username: []const u8,
+) (ws_test_client.ClientError || PayloadError || anyerror)!i64 {
+    var response = try client.expect(allocator, 2000, "response");
+    defer response.deinit();
+
+    const payload_value = response.payload();
+    const payload_obj = switch (payload_value) {
+        .object => |obj| obj,
+        else => return PayloadError.InvalidPayload,
+    };
+
+    const request_value = payload_obj.get("request") orelse return PayloadError.InvalidPayload;
+    const request_str = switch (request_value) {
+        .string => |s| s,
+        else => return PayloadError.InvalidPayload,
+    };
+    try std.testing.expectEqualStrings(expected_request, request_str);
+
+    const data_value = payload_obj.get("data") orelse return PayloadError.InvalidPayload;
+    const data_obj = switch (data_value) {
+        .object => |obj| obj,
+        else => return PayloadError.InvalidPayload,
+    };
+
+    const username_value = data_obj.get("username") orelse return PayloadError.InvalidPayload;
+    const username_str = switch (username_value) {
+        .string => |s| s,
+        else => return PayloadError.InvalidPayload,
+    };
+    try std.testing.expectEqualStrings(expected_username, username_str);
+
+    const id_value = data_obj.get("id") orelse return PayloadError.InvalidPayload;
+    const id_int = switch (id_value) {
+        .integer => |i| i,
+        .float => |f| @as(i64, @intFromFloat(f)),
+        else => return PayloadError.InvalidPayload,
+    };
+    try std.testing.expect(id_int > 0);
+
+    return id_int;
+}
+const PayloadError = error{InvalidPayload};

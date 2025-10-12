@@ -40,7 +40,6 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
-        "lib/sqlite",
         "src",
         // For example...
         //"LICENSE",

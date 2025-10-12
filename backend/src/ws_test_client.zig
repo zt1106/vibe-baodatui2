@@ -28,7 +28,7 @@ test "ws_test_client connects and handles ping" {
     }.run);
 }
 
-const IntegrationContext = struct {
+pub const IntegrationContext = struct {
     allocator: std.mem.Allocator,
     game_app: *app.GameApp,
     server: game_server.Instance,
@@ -37,7 +37,7 @@ const IntegrationContext = struct {
     fn deinit(self: *IntegrationContext) void {
         self.client.close();
         self.client.deinit();
-        self.server.stop();
+        self.server.stop(); // This already calls thread.join()
         self.server.deinit();
         self.game_app.deinit();
         self.allocator.destroy(self.game_app);
@@ -46,13 +46,17 @@ const IntegrationContext = struct {
 };
 
 fn setupServerAndClient(allocator: std.mem.Allocator, port: u16) !IntegrationContext {
-    const game_app = try allocator.create(app.GameApp);
-    errdefer allocator.destroy(game_app);
+    // Use the same allocator for everything since it's already thread-safe
+    const app_allocator = allocator;
+    const server_allocator = allocator;
 
-    game_app.* = try app.GameApp.init(allocator);
+    const game_app = try app_allocator.create(app.GameApp);
+    errdefer app_allocator.destroy(game_app);
+
+    game_app.* = try app.GameApp.init(app_allocator);
     errdefer game_app.deinit();
 
-    var server = try game_server.start(game_app, allocator, .{
+    var server = try game_server.start(game_app, server_allocator, .{
         .address = "127.0.0.1",
         .port = port,
         .handshake_timeout = 5,
@@ -83,7 +87,7 @@ fn setupServerAndClient(allocator: std.mem.Allocator, port: u16) !IntegrationCon
     };
 }
 
-fn withReadyClient(port: u16, callback: anytype) !void {
+pub fn withReadyClient(port: u16, callback: anytype) !void {
     var original_dir = try std.fs.cwd().openDir(".", .{});
     defer original_dir.close();
 
@@ -93,7 +97,11 @@ fn withReadyClient(port: u16, callback: anytype) !void {
     try tmp_dir.dir.setAsCwd();
     defer original_dir.setAsCwd() catch {};
 
-    const allocator = std.testing.allocator;
+    // Use a thread-safe allocator for the test
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
     var ctx = try setupReadyClient(allocator, port);
     errdefer ctx.deinit();
 
@@ -101,7 +109,7 @@ fn withReadyClient(port: u16, callback: anytype) !void {
     ctx.deinit();
 }
 
-fn setupReadyClient(allocator: std.mem.Allocator, port: u16) !IntegrationContext {
+pub fn setupReadyClient(allocator: std.mem.Allocator, port: u16) !IntegrationContext {
     var ctx = try setupServerAndClient(allocator, port);
     errdefer ctx.deinit();
 

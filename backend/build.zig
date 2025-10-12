@@ -44,15 +44,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    mod.addIncludePath(b.path("lib/sqlite"));
-    mod.addCSourceFile(.{
-        .file = b.path("lib/sqlite/sqlite3.c"),
-        .flags = &.{
-            "-std=c99",
-            "-DSQLITE_OMIT_LOAD_EXTENSION=1",
-            "-DSQLITE_THREADSAFE=1",
-        },
-    });
     mod.addImport("websocket", websocket_dep.module("websocket"));
 
     // Here we define an executable. An executable needs to have a root module

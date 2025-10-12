@@ -2,7 +2,6 @@ const std = @import("std");
 const ws = @import("websocket");
 
 const messages = @import("messages.zig");
-const sqlite = @import("sqlite.zig");
 const users = @import("user_service.zig");
 
 const log = std.log.scoped(.game_app);
@@ -26,21 +25,16 @@ pub const GameApp = struct {
     players: std.StringHashMap(Player),
     handlers: std.StringHashMap(HandlerFn),
     mutex: std.Thread.Mutex = .{},
-    db: sqlite.Database,
     user_service: users.Service,
 
     pub fn init(allocator: std.mem.Allocator) !GameApp {
-        const db = try sqlite.Database.open(allocator, "game.db");
         var self = GameApp{
             .allocator = allocator,
             .players = std.StringHashMap(Player).init(allocator),
             .handlers = std.StringHashMap(HandlerFn).init(allocator),
-            .db = db,
-            .user_service = undefined,
+            .user_service = users.Service.init(allocator),
         };
         errdefer self.deinit();
-
-        self.user_service = users.Service.init(allocator, &self.db);
 
         try self.ensureSchema();
         try self.registerRequestHandlerTyped(
@@ -84,6 +78,8 @@ pub const GameApp = struct {
     }
 
     pub fn deinit(self: *GameApp) void {
+        self.user_service.deinit();
+
         var it = self.players.iterator();
         while (it.next()) |entry| {
             const name = entry.key_ptr.*;
@@ -97,7 +93,6 @@ pub const GameApp = struct {
             self.allocator.free(@constCast(name));
         }
         self.handlers.deinit();
-        self.db.close();
     }
 
     pub fn onConnect(self: *GameApp, conn: *ws.Conn, state: *ConnectionState) !void {
@@ -302,12 +297,6 @@ pub const GameApp = struct {
     }
 
     fn ensureSchema(self: *GameApp) !void {
-        try self.user_service.ensureSchema();
-        try self.db.exec(
-            \\CREATE TABLE IF NOT EXISTS players(
-            \\    name TEXT PRIMARY KEY,
-            \\    score INTEGER NOT NULL DEFAULT 0
-            \\);
-        );
+        self.user_service.ensureSchema();
     }
 };
