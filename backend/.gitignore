@@ -1,0 +1,18 @@
+.zig-cache/
+zig-out/
+**/zig-cache/
+**/zig-out/
+
+# macOS metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE/editor artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*.orig
+*.bak
