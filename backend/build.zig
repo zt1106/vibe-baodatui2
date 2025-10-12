@@ -44,6 +44,16 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    mod.addIncludePath(b.path("lib/sqlite"));
+    mod.addCSourceFile(.{
+        .file = b.path("lib/sqlite/sqlite3.c"),
+        .flags = &.{
+            "-std=c99",
+            "-DSQLITE_OMIT_LOAD_EXTENSION=1",
+            "-DSQLITE_THREADSAFE=1",
+        },
+    });
+    mod.addImport("websocket", websocket_dep.module("websocket"));
 
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
@@ -87,6 +97,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    exe.linkLibC();
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
@@ -126,6 +137,7 @@ pub fn build(b: *std.Build) void {
     const mod_tests = b.addTest(.{
         .root_module = mod,
     });
+    mod_tests.linkLibC();
 
     // A run step that will run the test executable.
     const run_mod_tests = b.addRunArtifact(mod_tests);
@@ -136,6 +148,7 @@ pub fn build(b: *std.Build) void {
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
     });
+    exe_tests.linkLibC();
 
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
