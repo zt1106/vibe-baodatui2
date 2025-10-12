@@ -143,6 +143,44 @@ pub const GameApp = struct {
         try self.registerHandler(name, thunk.call);
     }
 
+    pub fn registerRequestHandlerTyped(
+        self: *GameApp,
+        comptime RequestPayload: type,
+        comptime ResponsePayload: type,
+        name: []const u8,
+        handler: fn (*GameApp, *ws.Conn, *ConnectionState, RequestPayload) anyerror!ResponsePayload,
+    ) RegisterHandlerError!void {
+        const ResponseMessage = messages.ResponseEnvelope(ResponsePayload);
+
+        const thunk = struct {
+            fn call(
+                app: *GameApp,
+                conn: *ws.Conn,
+                state: *ConnectionState,
+                message: *messages.Message,
+            ) anyerror!void {
+                const payload = try message.payloadAs(RequestPayload);
+                const request_type = message.typeName();
+
+                if (ResponsePayload == void) {
+                    try handler(app, conn, state, payload);
+                    try app.sendMessage(conn, "response", ResponseMessage{
+                        .request = request_type,
+                    });
+                    return;
+                }
+
+                const response = try handler(app, conn, state, payload);
+                try app.sendMessage(conn, "response", ResponseMessage{
+                    .request = request_type,
+                    .data = response,
+                });
+            }
+        };
+
+        try self.registerHandler(name, thunk.call);
+    }
+
     fn handleJoin(
         self: *GameApp,
         conn: *ws.Conn,

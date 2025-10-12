@@ -107,6 +107,18 @@ pub const SystemPayload = struct {
     message: []const u8,
 };
 
+pub fn ResponseEnvelope(comptime Payload: type) type {
+    return if (Payload == void)
+        struct {
+            request: []const u8,
+        }
+    else
+        struct {
+            request: []const u8,
+            data: Payload,
+        };
+}
+
 test "parse message envelope" {
     const allocator = std.testing.allocator;
     const raw =
