@@ -3,11 +3,14 @@ const ws = @import("websocket");
 
 const messages = @import("messages.zig");
 const sqlite = @import("sqlite.zig");
+const users = @import("user_service.zig");
 
 const log = std.log.scoped(.game_app);
 
 pub const ConnectionState = struct {
-    name: ?[]u8 = null,
+    player_name: ?[]u8 = null,
+    user_name: ?[]u8 = null,
+    user_id: ?i64 = null,
 };
 
 const Player = struct {
@@ -24,20 +27,52 @@ pub const GameApp = struct {
     handlers: std.StringHashMap(HandlerFn),
     mutex: std.Thread.Mutex = .{},
     db: sqlite.Database,
+    user_service: users.Service,
 
     pub fn init(allocator: std.mem.Allocator) !GameApp {
+        const db = try sqlite.Database.open(allocator, "game.db");
         var self = GameApp{
             .allocator = allocator,
             .players = std.StringHashMap(Player).init(allocator),
             .handlers = std.StringHashMap(HandlerFn).init(allocator),
-            .db = try sqlite.Database.open(allocator, "game.db"),
+            .db = db,
+            .user_service = undefined,
         };
         errdefer self.deinit();
 
+        self.user_service = users.Service.init(allocator, &self.db);
+
         try self.ensureSchema();
-        try self.registerHandlerTyped(messages.JoinPayload, "join", handleJoin);
-        try self.registerHandlerTyped(messages.ChatPayload, "chat", handleChat);
-        try self.registerHandlerTyped(messages.MovePayload, "move", handleMove);
+        try self.registerRequestHandlerTyped(
+            messages.UserRegisterPayload,
+            messages.UserResponsePayload,
+            "user_register",
+            handleUserRegister,
+        );
+        try self.registerRequestHandlerTyped(
+            messages.UserLoginPayload,
+            messages.UserResponsePayload,
+            "user_login",
+            handleUserLogin,
+        );
+        try self.registerRequestHandlerTyped(
+            messages.UserGetPayload,
+            messages.UserResponsePayload,
+            "user_get",
+            handleUserGet,
+        );
+        try self.registerRequestHandlerTyped(
+            messages.UserUpdatePayload,
+            messages.UserResponsePayload,
+            "user_update",
+            handleUserUpdate,
+        );
+        try self.registerRequestHandlerTyped(
+            messages.UserDeletePayload,
+            messages.UserDeleteResponsePayload,
+            "user_delete",
+            handleUserDelete,
+        );
         try self.registerRequestHandlerTyped(
             messages.PingPayload,
             messages.SystemPayload,
@@ -99,7 +134,7 @@ pub const GameApp = struct {
     }
 
     pub fn onDisconnect(self: *GameApp, state: *ConnectionState) void {
-        if (state.name) |name| {
+        if (state.player_name) |name| {
             const key: []const u8 = name;
             self.mutex.lock();
             const removed = self.players.remove(key);
@@ -112,10 +147,16 @@ pub const GameApp = struct {
             }
 
             self.allocator.free(name);
-            state.name = null;
+            state.player_name = null;
         } else {
             log.info("connection closed before join", .{});
         }
+
+        if (state.user_name) |user| {
+            self.allocator.free(user);
+            state.user_name = null;
+        }
+        state.user_id = null;
     }
 
     pub fn registerHandler(self: *GameApp, name: []const u8, handler: HandlerFn) RegisterHandlerError!void {
@@ -191,113 +232,49 @@ pub const GameApp = struct {
         try self.registerHandler(name, thunk.call);
     }
 
-    fn handleJoin(
+    fn handleUserRegister(
         self: *GameApp,
-        conn: *ws.Conn,
+        _: *ws.Conn,
         state: *ConnectionState,
-        payload: messages.JoinPayload,
-    ) !void {
-        const name_slice = payload.name;
-        var previous_name: ?[]u8 = null;
-        const stored_score = try self.fetchPlayerScore(name_slice);
-        const initial_score: u32 = stored_score orelse 0;
-
-        const name_copy_raw = try self.allocator.dupe(u8, name_slice);
-        const name_copy = name_copy_raw;
-        var keep_name = false;
-        defer if (!keep_name) self.allocator.free(name_copy);
-
-        self.mutex.lock();
-        if (self.players.contains(name_slice)) {
-            self.mutex.unlock();
-            try self.sendMessage(conn, "system", .{
-                .code = "name_taken",
-                .message = "That name is already in use",
-            });
-            return;
-        }
-
-        if (state.name) |existing| {
-            const key: []const u8 = existing;
-            _ = self.players.remove(key);
-            previous_name = existing;
-            state.name = null;
-        }
-
-        try self.players.put(name_copy, Player{ .score = initial_score });
-        state.name = name_copy;
-        keep_name = true;
-
-        self.mutex.unlock();
-
-        if (previous_name) |old| self.allocator.free(old);
-        try self.persistPlayerScore(name_slice, initial_score);
-
-        log.info("player joined: {s}", .{name_slice});
-        try self.sendMessage(conn, "system", .{
-            .code = "joined",
-            .message = "You have joined the game",
-        });
+        payload: messages.UserRegisterPayload,
+    ) !messages.UserResponsePayload {
+        return self.user_service.handleRegister(state, payload);
     }
 
-    fn handleChat(
+    fn handleUserLogin(
         self: *GameApp,
-        conn: *ws.Conn,
+        _: *ws.Conn,
         state: *ConnectionState,
-        payload: messages.ChatPayload,
-    ) !void {
-        const player_name = state.name orelse {
-            try self.sendMessage(conn, "system", .{
-                .code = "not_joined",
-                .message = "Join the game before chatting",
-            });
-            return;
-        };
-
-        log.info("{s} says: {s}", .{ player_name, payload.message });
-
-        try self.sendMessage(conn, "system", .{
-            .code = "chat_ack",
-            .message = "Message received",
-        });
+        payload: messages.UserLoginPayload,
+    ) !messages.UserResponsePayload {
+        return self.user_service.handleLogin(state, payload);
     }
 
-    fn handleMove(
+    fn handleUserGet(
         self: *GameApp,
-        conn: *ws.Conn,
+        _: *ws.Conn,
+        _: *ConnectionState,
+        payload: messages.UserGetPayload,
+    ) !messages.UserResponsePayload {
+        return self.user_service.handleGet(payload);
+    }
+
+    fn handleUserUpdate(
+        self: *GameApp,
+        _: *ws.Conn,
         state: *ConnectionState,
-        payload: messages.MovePayload,
-    ) !void {
-        const player_name = state.name orelse {
-            try self.sendMessage(conn, "system", .{
-                .code = "not_joined",
-                .message = "Join the game before moving",
-            });
-            return;
-        };
+        payload: messages.UserUpdatePayload,
+    ) !messages.UserResponsePayload {
+        return self.user_service.handleUpdate(state, payload);
+    }
 
-        log.debug("movement from {s}: ({d:.2}, {d:.2})", .{ player_name, payload.x, payload.y });
-
-        self.mutex.lock();
-        const player_entry = self.players.getPtr(player_name) orelse {
-            self.mutex.unlock();
-            log.warn("move received for unknown player record: {s}", .{player_name});
-            try self.sendMessage(conn, "system", .{
-                .code = "not_registered",
-                .message = "Player record missing",
-            });
-            return;
-        };
-        player_entry.*.score += 1;
-        const updated_score = player_entry.*.score;
-        self.mutex.unlock();
-
-        try self.persistPlayerScore(player_name, updated_score);
-
-        try self.sendMessage(conn, "system", .{
-            .code = "move_ack",
-            .message = "Position updated",
-        });
+    fn handleUserDelete(
+        self: *GameApp,
+        _: *ws.Conn,
+        state: *ConnectionState,
+        payload: messages.UserDeletePayload,
+    ) !messages.UserDeleteResponsePayload {
+        return self.user_service.handleDelete(state, payload);
     }
 
     fn handlePing(
@@ -325,51 +302,12 @@ pub const GameApp = struct {
     }
 
     fn ensureSchema(self: *GameApp) !void {
+        try self.user_service.ensureSchema();
         try self.db.exec(
             \\CREATE TABLE IF NOT EXISTS players(
             \\    name TEXT PRIMARY KEY,
             \\    score INTEGER NOT NULL DEFAULT 0
             \\);
         );
-    }
-
-    fn persistPlayerScore(self: *GameApp, name: []const u8, score: u32) !void {
-        var stmt = try self.db.prepare(
-            \\INSERT INTO players(name, score)
-            \\VALUES (?1, ?2)
-            \\ON CONFLICT(name) DO UPDATE SET score = excluded.score;
-        );
-        defer stmt.finalize();
-
-        try stmt.bindText(1, name);
-        try stmt.bindInt(2, @as(i64, @intCast(score)));
-        try stmt.stepExpectDone();
-    }
-
-    fn fetchPlayerScore(self: *GameApp, name: []const u8) !?u32 {
-        var stmt = try self.db.prepare(
-            \\SELECT score FROM players WHERE name = ?1;
-        );
-        defer stmt.finalize();
-
-        try stmt.bindText(1, name);
-
-        return switch (try stmt.step()) {
-            .row => blk: {
-                const raw = stmt.columnInt(0);
-                if (raw < 0) {
-                    log.warn("negative score found for {s}; resetting to zero", .{name});
-                    break :blk 0;
-                }
-                const max_score = std.math.maxInt(u32);
-                const max_score_i64 = @as(i64, max_score);
-                if (raw > max_score_i64) {
-                    log.warn("score overflow for {s}; clamping to {d}", .{ name, max_score });
-                    break :blk max_score;
-                }
-                break :blk @as(u32, @intCast(raw));
-            },
-            .done => null,
-        };
     }
 };

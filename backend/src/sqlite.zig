@@ -88,6 +88,18 @@ pub const Database = struct {
             .handle = stmt_handle.?,
         };
     }
+
+    pub fn lastInsertRowId(self: *Database) i64 {
+        return c.sqlite3_last_insert_rowid(self.handle);
+    }
+
+    pub fn changes(self: *Database) i32 {
+        return @as(i32, @intCast(c.sqlite3_changes(self.handle)));
+    }
+
+    pub fn errCode(self: *Database) i32 {
+        return @as(i32, @intCast(c.sqlite3_errcode(self.handle)));
+    }
 };
 
 pub const Statement = struct {
@@ -151,6 +163,8 @@ fn dupZ(allocator: std.mem.Allocator, slice: []const u8) ![:0]u8 {
     std.mem.copyForwards(u8, buf, slice);
     return buf;
 }
+
+pub const SQLITE_CONSTRAINT = c.SQLITE_CONSTRAINT;
 
 fn errorMessage(handle: *c.sqlite3) []const u8 {
     const msg_ptr = c.sqlite3_errmsg(handle);

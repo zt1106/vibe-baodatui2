@@ -107,6 +107,36 @@ pub const SystemPayload = struct {
     message: []const u8,
 };
 
+pub const UserRegisterPayload = struct {
+    username: []const u8,
+};
+
+pub const UserLoginPayload = struct {
+    username: []const u8,
+};
+
+pub const UserGetPayload = struct {
+    username: []const u8,
+};
+
+pub const UserDeletePayload = struct {
+    username: []const u8,
+};
+
+pub const UserUpdatePayload = struct {
+    username: []const u8,
+    new_username: []const u8,
+};
+
+pub const UserResponsePayload = struct {
+    id: i64,
+    username: []const u8,
+};
+
+pub const UserDeleteResponsePayload = struct {
+    username: []const u8,
+};
+
 pub fn ResponseEnvelope(comptime Payload: type) type {
     return if (Payload == void)
         struct {
