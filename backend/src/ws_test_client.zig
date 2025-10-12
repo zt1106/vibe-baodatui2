@@ -184,11 +184,11 @@ pub const TestClient = struct {
             const now = std.time.milliTimestamp();
             if (now >= deadline_ms) return error.Timeout;
 
-            const remaining_ms = @as(u64, @intCast(deadline_ms - now));
-            const wait_ms = if (remaining_ms > @as(u64, std.math.maxInt(u32)))
+            const remaining_ms: u64 = @intCast(deadline_ms - now);
+            const wait_ms: u32 = if (remaining_ms > std.math.maxInt(u32))
                 std.math.maxInt(u32)
             else
-                @as(u32, @intCast(remaining_ms));
+                @intCast(remaining_ms);
 
             try self.client.readTimeout(wait_ms);
 

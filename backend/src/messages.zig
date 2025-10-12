@@ -107,6 +107,67 @@ pub const SystemPayload = struct {
     message: []const u8,
 };
 
+pub const RoomStatePayload = enum {
+    waiting,
+    in_game,
+};
+
+pub const RoomPlayerStatePayload = enum {
+    not_prepared,
+    prepared,
+};
+
+pub const RoomSummaryPayload = struct {
+    id: u32,
+    name: []const u8,
+    state: RoomStatePayload,
+    player_count: u8,
+    player_limit: u8,
+};
+
+pub const RoomPlayerPayload = struct {
+    user_id: i64,
+    username: []const u8,
+    state: RoomPlayerStatePayload,
+    is_host: bool,
+};
+
+pub const RoomDetailPayload = struct {
+    id: u32,
+    name: []const u8,
+    state: RoomStatePayload,
+    host_id: i64,
+    player_limit: u8,
+    players: []const RoomPlayerPayload,
+};
+
+pub const RoomListRequestPayload = struct {};
+
+pub const RoomListResponsePayload = struct {
+    rooms: []const RoomSummaryPayload,
+};
+
+pub const RoomCreatePayload = struct {
+    name: []const u8,
+    player_limit: u8 = 4,
+};
+
+pub const RoomJoinPayload = struct {
+    room_id: u32,
+};
+
+pub const RoomLeavePayload = struct {};
+
+pub const RoomLeaveResponsePayload = struct {
+    room_id: u32,
+};
+
+pub const RoomReadyPayload = struct {
+    prepared: bool,
+};
+
+pub const RoomStartPayload = struct {};
+
 pub const UserRegisterPayload = struct {
     username: []const u8,
 };

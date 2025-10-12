@@ -4,6 +4,7 @@ pub const messages = @import("messages.zig");
 pub const game_server = @import("game_server.zig");
 pub const app = @import("app.zig");
 const user_service = @import("user_service.zig");
+pub const room_service = @import("room_service.zig");
 pub const ws_test_client = @import("ws_test_client.zig");
 
 test "messages roundtrip" {
@@ -23,5 +24,6 @@ test "all module tests are wired" {
     std.testing.refAllDecls(game_server);
     std.testing.refAllDecls(app);
     std.testing.refAllDecls(user_service);
+    std.testing.refAllDecls(room_service);
     std.testing.refAllDecls(ws_test_client);
 }

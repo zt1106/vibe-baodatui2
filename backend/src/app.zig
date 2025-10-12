@@ -3,6 +3,7 @@ const ws = @import("websocket");
 
 const messages = @import("messages.zig");
 const users = @import("user_service.zig");
+const rooms = @import("room_service.zig");
 
 const log = std.log.scoped(.game_app);
 
@@ -10,6 +11,8 @@ pub const ConnectionState = struct {
     player_name: ?[]u8 = null,
     user_name: ?[]u8 = null,
     user_id: ?i64 = null,
+    room_id: ?u32 = null,
+    disconnected: bool = false,
 };
 
 const Player = struct {
@@ -26,6 +29,7 @@ pub const GameApp = struct {
     handlers: std.StringHashMap(HandlerFn),
     mutex: std.Thread.Mutex = .{},
     user_service: users.Service,
+    room_service: rooms.RoomService,
 
     pub fn init(allocator: std.mem.Allocator) !GameApp {
         var self = GameApp{
@@ -33,6 +37,7 @@ pub const GameApp = struct {
             .players = std.StringHashMap(Player).init(allocator),
             .handlers = std.StringHashMap(HandlerFn).init(allocator),
             .user_service = users.Service.init(allocator),
+            .room_service = rooms.RoomService.init(allocator),
         };
         errdefer self.deinit();
 
@@ -73,11 +78,43 @@ pub const GameApp = struct {
             "ping",
             handlePing,
         );
+        try self.registerHandler("room_list", handleRoomList);
+        try self.registerRequestHandlerTyped(
+            messages.RoomCreatePayload,
+            messages.RoomDetailPayload,
+            "room_create",
+            handleRoomCreate,
+        );
+        try self.registerRequestHandlerTyped(
+            messages.RoomJoinPayload,
+            messages.RoomDetailPayload,
+            "room_join",
+            handleRoomJoin,
+        );
+        try self.registerRequestHandlerTyped(
+            messages.RoomLeavePayload,
+            messages.RoomLeaveResponsePayload,
+            "room_leave",
+            handleRoomLeave,
+        );
+        try self.registerRequestHandlerTyped(
+            messages.RoomReadyPayload,
+            messages.RoomDetailPayload,
+            "room_ready",
+            handleRoomReady,
+        );
+        try self.registerRequestHandlerTyped(
+            messages.RoomStartPayload,
+            messages.RoomDetailPayload,
+            "room_start",
+            handleRoomStart,
+        );
 
         return self;
     }
 
     pub fn deinit(self: *GameApp) void {
+        self.room_service.deinit();
         self.user_service.deinit();
 
         var it = self.players.iterator();
@@ -129,6 +166,11 @@ pub const GameApp = struct {
     }
 
     pub fn onDisconnect(self: *GameApp, state: *ConnectionState) void {
+        if (state.disconnected) {
+            return;
+        }
+        state.disconnected = true;
+
         if (state.player_name) |name| {
             const key: []const u8 = name;
             self.mutex.lock();
@@ -151,7 +193,13 @@ pub const GameApp = struct {
             self.allocator.free(user);
             state.user_name = null;
         }
+        const user_id = state.user_id;
         state.user_id = null;
+        state.room_id = null;
+
+        if (user_id) |uid| {
+            self.room_service.handleDisconnect(uid);
+        }
     }
 
     pub fn registerHandler(self: *GameApp, name: []const u8, handler: HandlerFn) RegisterHandlerError!void {
@@ -298,5 +346,78 @@ pub const GameApp = struct {
 
     fn ensureSchema(self: *GameApp) !void {
         self.user_service.ensureSchema();
+        self.room_service.ensureSchema();
     }
 };
+
+fn handleRoomList(
+    self: *GameApp,
+    conn: *ws.Conn,
+    _: *ConnectionState,
+    message: *messages.Message,
+) anyerror!void {
+    _ = try message.payloadAs(messages.RoomListRequestPayload);
+    var view = try self.room_service.listRooms(self.allocator);
+    defer view.deinit();
+    const ResponseMessage = messages.ResponseEnvelope(messages.RoomListResponsePayload);
+    const response = ResponseMessage{
+        .request = message.typeName(),
+        .data = view.payload,
+    };
+    try self.sendMessage(conn, "response", response);
+}
+
+fn handleRoomCreate(
+    self: *GameApp,
+    _: *ws.Conn,
+    state: *ConnectionState,
+    payload: messages.RoomCreatePayload,
+) anyerror!messages.RoomDetailPayload {
+    const detail = try self.room_service.createRoom(state.user_id, state.user_name, payload);
+    state.room_id = detail.id;
+    return detail;
+}
+
+fn handleRoomJoin(
+    self: *GameApp,
+    _: *ws.Conn,
+    state: *ConnectionState,
+    payload: messages.RoomJoinPayload,
+) anyerror!messages.RoomDetailPayload {
+    const detail = try self.room_service.joinRoom(state.user_id, state.user_name, payload);
+    state.room_id = detail.id;
+    return detail;
+}
+
+fn handleRoomLeave(
+    self: *GameApp,
+    _: *ws.Conn,
+    state: *ConnectionState,
+    _: messages.RoomLeavePayload,
+) anyerror!messages.RoomLeaveResponsePayload {
+    const result = try self.room_service.leaveRoom(state.user_id);
+    state.room_id = null;
+    return result;
+}
+
+fn handleRoomReady(
+    self: *GameApp,
+    _: *ws.Conn,
+    state: *ConnectionState,
+    payload: messages.RoomReadyPayload,
+) anyerror!messages.RoomDetailPayload {
+    const detail = try self.room_service.setPrepared(state.user_id, payload);
+    state.room_id = detail.id;
+    return detail;
+}
+
+fn handleRoomStart(
+    self: *GameApp,
+    _: *ws.Conn,
+    state: *ConnectionState,
+    _: messages.RoomStartPayload,
+) anyerror!messages.RoomDetailPayload {
+    const detail = try self.room_service.startGame(state.user_id);
+    state.room_id = detail.id;
+    return detail;
+}
