@@ -45,6 +45,31 @@ var _room_create_inflight: bool = false
 var _mock_mode: bool = false
 
 
+func _pending_key(value: Variant) -> String:
+	if value == null:
+		return ""
+	var type := typeof(value)
+	match type:
+		TYPE_INT:
+			return str(value)
+		TYPE_FLOAT:
+			var as_float: float = value
+			var as_int := int(as_float)
+			if is_equal_approx(as_float, float(as_int)):
+				return str(as_int)
+			return str(as_float)
+		TYPE_STRING:
+			return str(value)
+		_:
+			return str(value)
+
+func _enter_online_lobby() -> void:
+	_mock_mode = false
+	_show_lobby_view()
+	_set_lobby_status("正在加载房间...", false)
+	_request_room_list()
+
+
 func _ready() -> void:
 	RandomNickname.init()
 	_cache_ui_nodes()
@@ -229,11 +254,14 @@ func _handle_system_notification(payload: Variant) -> void:
 func _handle_response(envelope: Dictionary) -> void:
 	if !envelope.has("id"):
 		return
-	var id: Variant = envelope.get("id")
-	if !_pending_requests.has(id):
+	var id_value: Variant = envelope.get("id")
+	if id_value == null:
 		return
-	var pending: Dictionary = _pending_requests[id]
-	_pending_requests.erase(id)
+	var key := _pending_key(id_value)
+	if !_pending_requests.has(key):
+		return
+	var pending: Dictionary = _pending_requests[key]
+	_pending_requests.erase(key)
 	var result: Variant = envelope.get("result")
 	var on_success: Callable = pending.get("success", Callable())
 	if on_success.is_valid():
@@ -241,11 +269,13 @@ func _handle_response(envelope: Dictionary) -> void:
 
 func _handle_error_response(envelope: Dictionary) -> void:
 	var error_info: Variant = envelope.get("error", {})
-	var id: Variant = envelope.get("id")
+	var id_value: Variant = envelope.get("id")
 	var pending: Dictionary = {}
-	if id != null and _pending_requests.has(id):
-		pending = _pending_requests[id]
-		_pending_requests.erase(id)
+	if id_value != null:
+		var key := _pending_key(id_value)
+		if _pending_requests.has(key):
+			pending = _pending_requests[key]
+			_pending_requests.erase(key)
 	var message := "请求失败。"
 	var code := -1
 	var extra: Dictionary = {}
@@ -284,6 +314,7 @@ func _send_request(method: String, params: Dictionary, on_success: Callable, on_
 		return
 	_request_id_seq += 1
 	var request_id := _request_id_seq
+	var pending_key := _pending_key(request_id)
 	var payload := {
 		"jsonrpc": "2.0",
 		"id": request_id,
@@ -297,7 +328,7 @@ func _send_request(method: String, params: Dictionary, on_success: Callable, on_
 			on_failure.call({"code": err, "message": "请求发送失败。", "method": method})
 		_show_error("无法连接到服务器。")
 		return
-	_pending_requests[request_id] = {
+	_pending_requests[pending_key] = {
 		"success": on_success,
 		"failure": on_failure,
 		"method": method,
@@ -412,8 +443,7 @@ func _on_user_set_name_success(result: Variant) -> void:
 			_user_info_label.text = "当前登录：%s（#%d）" % [_username, _user_id]
 		else:
 			_user_info_label.text = "当前登录：%s" % _username
-	_show_lobby_view()
-	_request_room_list()
+	_enter_online_lobby()
 
 func _on_user_set_name_error(error_data: Dictionary) -> void:
 	if _nickname_input:
@@ -497,6 +527,9 @@ func _update_room_list(payload: Variant) -> void:
 			_room_list.set_item_metadata(index, room_entry.duplicate(true))
 		_rooms[room_id] = room_entry.duplicate(true)
 	_set_lobby_status("找到 %d 个房间。" % rooms.size(), false)
+	if _room_list and _room_list.get_item_count() > 0:
+		_room_list.select(0)
+		_on_room_selected(0)
 
 func _on_room_selected(index: int) -> void:
 	if _room_list == null:
