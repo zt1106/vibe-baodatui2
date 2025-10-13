@@ -105,31 +105,35 @@ const Handler = struct {
     }
 
     pub fn clientMessage(self: *Handler, data: []const u8) !void {
-        var message = messages.parseMessage(self.allocator, data) catch |err| {
+        var frame = messages.parseFrame(self.allocator, data) catch |err| {
             log.warn("invalid message from client: {}", .{err});
-            try self.sendSystemError("invalid_message", "Message could not be parsed");
+            const error_frame = try messages.encodeError(self.allocator, null, -32700, "Parse error");
+            defer self.allocator.free(error_frame);
+            try self.conn.write(error_frame);
             return;
         };
-        defer message.deinit();
+        defer frame.deinit();
 
-        self.app.onMessage(self.conn, &self.state, &message) catch |err| {
-            log.err("handler error: {}", .{err});
-            try self.sendSystemError("handler_error", @errorName(err));
-        };
+        switch (frame.kind()) {
+            .call => {
+                const call = try frame.call();
+                self.app.onCall(self.conn, &self.state, call) catch |err| {
+                    log.err("handler error: {}", .{err});
+                    if (call.idValue()) |id| {
+                        const error_frame = try messages.encodeError(self.allocator, id, -32000, @errorName(err));
+                        defer self.allocator.free(error_frame);
+                        self.conn.write(error_frame) catch {};
+                    }
+                };
+            },
+            .response, .rpc_error => {
+                log.warn("unexpected JSON-RPC frame from client: {s}", .{@tagName(frame.kind())});
+            },
+        }
     }
 
     pub fn close(self: *Handler) void {
         self.app.onDisconnect(&self.state);
-    }
-
-    fn sendSystemError(self: *Handler, code: []const u8, message: []const u8) !void {
-        const payload = messages.SystemPayload{
-            .code = code,
-            .message = message,
-        };
-        const frame = try messages.encodeMessage(self.allocator, "system", payload);
-        defer self.allocator.free(frame);
-        try self.conn.write(frame);
     }
 };
 
@@ -178,10 +182,11 @@ test "game_server sends welcome message on connect" {
                 client.deinit();
             }
 
-            var welcome = try client.expect(allocator, 2000, "system");
+            var welcome = try client.expectCall(allocator, 2000, "system");
             defer welcome.deinit();
 
-            const payload = try welcome.payloadAs(messages.SystemPayload);
+            const call = try welcome.call();
+            const payload = try call.paramsAs(messages.SystemPayload);
             try std.testing.expectEqualStrings("connected", payload.code);
             try std.testing.expectEqualStrings("Welcome to the game server", payload.message);
         }
@@ -220,18 +225,25 @@ test "game_server returns system error for unknown message" {
                 client.deinit();
             }
 
-            var welcome = try client.expect(allocator, 2000, "system");
+            var welcome = try client.expectCall(allocator, 2000, "system");
             defer welcome.deinit();
 
-            _ = try welcome.payloadAs(messages.SystemPayload);
+            const call = try welcome.call();
+            _ = try call.paramsAs(messages.SystemPayload);
 
-            try client.sendMessage("unknown_message", .{});
+            const id = try client.sendRequest("unknown_message", messages.EmptyParams{});
 
-            var response = try client.expect(allocator, 2000, "system");
-            defer response.deinit();
+            var response_frame = try client.expectResponse(allocator, 2000, id);
+            defer response_frame.deinit();
 
-            const payload = try response.payloadAs(messages.SystemPayload);
-            try std.testing.expectEqualStrings("unknown_type", payload.code);
+            switch (response_frame.kind()) {
+                .rpc_error => {
+                    const err = try response_frame.rpcError();
+                    try std.testing.expect(err.codeValue() == -32601);
+                    try std.testing.expectEqualStrings("Method not found", err.messageValue());
+                },
+                else => return error.UnexpectedMessageType,
+            }
         }
     }.run);
 }

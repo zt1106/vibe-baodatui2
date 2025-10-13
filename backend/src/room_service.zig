@@ -400,39 +400,31 @@ const RoomDetailSnapshot = struct {
 fn expectUserResponseId(
     allocator: std.mem.Allocator,
     client: *ws_test_client.TestClient,
-    expected_request: []const u8,
+    request_id: messages.Id,
     expected_username: []const u8,
 ) (ws_test_client.ClientError || PayloadError || anyerror)!i64 {
-    var response = try client.expect(allocator, 2000, "response");
-    defer response.deinit();
+    var frame = try client.expectResponse(allocator, 2000, request_id);
+    defer frame.deinit();
 
-    const payload_value = response.payload();
+    const response = switch (frame.kind()) {
+        .response => try frame.response(),
+        else => return PayloadError.InvalidPayload,
+    };
+
+    const payload_value = response.resultValue();
     const payload_obj = switch (payload_value) {
         .object => |obj| obj,
         else => return PayloadError.InvalidPayload,
     };
 
-    const request_value = payload_obj.get("request") orelse return PayloadError.InvalidPayload;
-    const request_str = switch (request_value) {
-        .string => |s| s,
-        else => return PayloadError.InvalidPayload,
-    };
-    try std.testing.expectEqualStrings(expected_request, request_str);
-
-    const data_value = payload_obj.get("data") orelse return PayloadError.InvalidPayload;
-    const data_obj = switch (data_value) {
-        .object => |obj| obj,
-        else => return PayloadError.InvalidPayload,
-    };
-
-    const username_value = data_obj.get("username") orelse return PayloadError.InvalidPayload;
+    const username_value = payload_obj.get("username") orelse return PayloadError.InvalidPayload;
     const username_str = switch (username_value) {
         .string => |s| s,
         else => return PayloadError.InvalidPayload,
     };
     try std.testing.expectEqualStrings(expected_username, username_str);
 
-    const id_value = data_obj.get("id") orelse return PayloadError.InvalidPayload;
+    const id_value = payload_obj.get("id") orelse return PayloadError.InvalidPayload;
     const id_any = switch (id_value) {
         .integer => |i| i,
         .float => |f| @as(i64, @intFromFloat(f)),
@@ -445,25 +437,17 @@ fn expectUserResponseId(
 fn expectRoomDetailSnapshot(
     allocator: std.mem.Allocator,
     client: *ws_test_client.TestClient,
-    expected_request: []const u8,
+    request_id: messages.Id,
 ) (ws_test_client.ClientError || PayloadError || anyerror)!RoomDetailSnapshot {
-    var response = try client.expect(allocator, 2000, "response");
-    defer response.deinit();
+    var frame = try client.expectResponse(allocator, 2000, request_id);
+    defer frame.deinit();
 
-    const payload_value = response.payload();
-    const payload_obj = switch (payload_value) {
-        .object => |obj| obj,
+    const response = switch (frame.kind()) {
+        .response => try frame.response(),
         else => return PayloadError.InvalidPayload,
     };
 
-    const request_value = payload_obj.get("request") orelse return PayloadError.InvalidPayload;
-    const request_str = switch (request_value) {
-        .string => |s| s,
-        else => return PayloadError.InvalidPayload,
-    };
-    try std.testing.expectEqualStrings(expected_request, request_str);
-
-    const data_value = payload_obj.get("data") orelse return PayloadError.InvalidPayload;
+    const data_value = response.resultValue();
     const data_obj = switch (data_value) {
         .object => |obj| obj,
         else => return PayloadError.InvalidPayload,
@@ -616,17 +600,17 @@ test "integration: room lobby flow" {
             const allocator = ctx.allocator;
             const host = &ctx.client;
 
-            try host.sendMessage("user_register", messages.UserRegisterPayload{ .username = "Alice" });
-            const host_id = try expectUserResponseId(allocator, host, "user_register", "Alice");
+            const register_id = try host.sendRequest("user_register", messages.UserRegisterPayload{ .username = "Alice" });
+            const host_id = try expectUserResponseId(allocator, host, register_id, "Alice");
 
-            try host.sendMessage(
+            const create_id = try host.sendRequest(
                 "room_create",
                 messages.RoomCreatePayload{
                     .name = "Integration Room",
                     .player_limit = 4,
                 },
             );
-            var created_room = try expectRoomDetailSnapshot(allocator, host, "room_create");
+            var created_room = try expectRoomDetailSnapshot(allocator, host, create_id);
             defer created_room.deinit();
             const room_id = created_room.id;
             try std.testing.expectEqual(host_id, created_room.host_id);
@@ -634,55 +618,21 @@ test "integration: room lobby flow" {
             try std.testing.expect(created_room.players[0].is_host);
             try std.testing.expectEqual(host_id, created_room.players[0].user_id);
 
-            try host.sendMessage("room_list", messages.RoomListRequestPayload{});
+            const list_id = try host.sendRequest("room_list", messages.RoomListRequestPayload{});
             {
-                var list_response = try host.expect(allocator, 2000, "response");
-                defer list_response.deinit();
-                const payload_value = list_response.payload();
-                const payload_obj = switch (payload_value) {
-                    .object => |obj| obj,
+                var list_frame = try host.expectResponse(allocator, 2000, list_id);
+                defer list_frame.deinit();
+                switch (list_frame.kind()) {
+                    .response => {
+                        const response = try list_frame.response();
+                        const payload = try response.resultAs(messages.RoomListResponsePayload);
+                        try std.testing.expectEqual(@as(usize, 1), payload.rooms.len);
+                        const first_room = payload.rooms[0];
+                        try std.testing.expectEqual(room_id, first_room.id);
+                        try std.testing.expectEqual(messages.RoomStatePayload.waiting, first_room.state);
+                    },
                     else => return PayloadError.InvalidPayload,
-                };
-                const request_value = payload_obj.get("request") orelse return PayloadError.InvalidPayload;
-                const request_str = switch (request_value) {
-                    .string => |s| s,
-                    else => return PayloadError.InvalidPayload,
-                };
-                try std.testing.expectEqualStrings("room_list", request_str);
-
-                const data_value = payload_obj.get("data") orelse return PayloadError.InvalidPayload;
-                const data_obj = switch (data_value) {
-                    .object => |obj| obj,
-                    else => return PayloadError.InvalidPayload,
-                };
-
-                const rooms_value = data_obj.get("rooms") orelse return PayloadError.InvalidPayload;
-                const rooms_array = switch (rooms_value) {
-                    .array => |arr| arr,
-                    else => return PayloadError.InvalidPayload,
-                };
-                try std.testing.expectEqual(@as(usize, 1), rooms_array.items.len);
-                const first_room = rooms_array.items[0];
-                const first_obj = switch (first_room) {
-                    .object => |obj| obj,
-                    else => return PayloadError.InvalidPayload,
-                };
-
-                const id_value = first_obj.get("id") orelse return PayloadError.InvalidPayload;
-                const id_raw = switch (id_value) {
-                    .integer => |i| i,
-                    .float => |f| @as(i64, @intFromFloat(f)),
-                    else => return PayloadError.InvalidPayload,
-                };
-                try std.testing.expectEqual(room_id, @as(u32, @intCast(id_raw)));
-
-                const state_value = first_obj.get("state") orelse return PayloadError.InvalidPayload;
-                const state_str = switch (state_value) {
-                    .string => |s| s,
-                    else => return PayloadError.InvalidPayload,
-                };
-                const state_enum = std.meta.stringToEnum(messages.RoomStatePayload, state_str) orelse return PayloadError.InvalidPayload;
-                try std.testing.expectEqual(messages.RoomStatePayload.waiting, state_enum);
+                }
             }
 
             var guest = try ws_test_client.TestClient.connect(allocator, .{
@@ -696,32 +646,33 @@ test "integration: room lobby flow" {
                 guest.deinit();
             }
 
-            var guest_welcome = try guest.expect(allocator, 2000, "system");
+            var guest_welcome = try guest.expectCall(allocator, 2000, "system");
             defer guest_welcome.deinit();
-            const guest_welcome_payload = try guest_welcome.payloadAs(messages.SystemPayload);
+            const guest_welcome_call = try guest_welcome.call();
+            const guest_welcome_payload = try guest_welcome_call.paramsAs(messages.SystemPayload);
             try std.testing.expectEqualStrings("connected", guest_welcome_payload.code);
 
-            try guest.sendMessage("user_register", messages.UserRegisterPayload{ .username = "Bob" });
-            const guest_id = try expectUserResponseId(allocator, &guest, "user_register", "Bob");
+            const guest_register_id = try guest.sendRequest("user_register", messages.UserRegisterPayload{ .username = "Bob" });
+            const guest_id = try expectUserResponseId(allocator, &guest, guest_register_id, "Bob");
 
-            try guest.sendMessage("room_join", messages.RoomJoinPayload{ .room_id = room_id });
-            var joined_room = try expectRoomDetailSnapshot(allocator, &guest, "room_join");
+            const join_id = try guest.sendRequest("room_join", messages.RoomJoinPayload{ .room_id = room_id });
+            var joined_room = try expectRoomDetailSnapshot(allocator, &guest, join_id);
             defer joined_room.deinit();
             try std.testing.expectEqual(@as(usize, 2), joined_room.players.len);
             try std.testing.expectEqual(guest_id, joined_room.players[1].user_id);
 
-            try host.sendMessage("room_ready", messages.RoomReadyPayload{ .prepared = true });
-            var host_ready = try expectRoomDetailSnapshot(allocator, host, "room_ready");
+            const host_ready_id = try host.sendRequest("room_ready", messages.RoomReadyPayload{ .prepared = true });
+            var host_ready = try expectRoomDetailSnapshot(allocator, host, host_ready_id);
             defer host_ready.deinit();
             try std.testing.expectEqual(messages.RoomPlayerStatePayload.prepared, host_ready.players[0].state);
 
-            try guest.sendMessage("room_ready", messages.RoomReadyPayload{ .prepared = true });
-            var guest_ready = try expectRoomDetailSnapshot(allocator, &guest, "room_ready");
+            const guest_ready_id = try guest.sendRequest("room_ready", messages.RoomReadyPayload{ .prepared = true });
+            var guest_ready = try expectRoomDetailSnapshot(allocator, &guest, guest_ready_id);
             defer guest_ready.deinit();
             try std.testing.expectEqual(messages.RoomPlayerStatePayload.prepared, guest_ready.players[1].state);
 
-            try host.sendMessage("room_start", messages.RoomStartPayload{});
-            var started_room = try expectRoomDetailSnapshot(allocator, host, "room_start");
+            const start_id = try host.sendRequest("room_start", messages.RoomStartPayload{});
+            var started_room = try expectRoomDetailSnapshot(allocator, host, start_id);
             defer started_room.deinit();
             try std.testing.expectEqual(messages.RoomStatePayload.in_game, started_room.state);
         }

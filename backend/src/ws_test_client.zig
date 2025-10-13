@@ -17,13 +17,20 @@ pub const ClientError = error{
 test "ws_test_client connects and handles ping" {
     try withReadyClient(22001, struct {
         fn run(ctx: *IntegrationContext) !void {
-            try ctx.client.sendMessage("ping", messages.PingPayload{});
+            const id = try ctx.client.sendRequest("ping", messages.PingPayload{});
 
-            var response = try ctx.client.expect(ctx.allocator, 2000, "response");
-            defer response.deinit();
-            const payload = try response.payloadAs(messages.ResponseEnvelope(messages.SystemPayload));
-            try std.testing.expectEqualStrings("ping", payload.request);
-            try std.testing.expectEqualStrings("pong", payload.data.code);
+            var frame = try ctx.client.expectResponse(ctx.allocator, 2000, id);
+            defer frame.deinit();
+
+            switch (frame.kind()) {
+                .response => {
+                    const response = try frame.response();
+                    const payload = try response.resultAs(messages.SystemPayload);
+                    try std.testing.expectEqualStrings("pong", payload.code);
+                },
+                .rpc_error => return error.UnexpectedMessageType,
+                .call => return error.UnexpectedMessageType,
+            }
         }
     }.run);
 }
@@ -113,9 +120,10 @@ pub fn setupReadyClient(allocator: std.mem.Allocator, port: u16) !IntegrationCon
     var ctx = try setupServerAndClient(allocator, port);
     errdefer ctx.deinit();
 
-    var welcome = try ctx.client.expect(allocator, 2000, "system");
+    var welcome = try ctx.client.expectCall(allocator, 2000, "system");
     defer welcome.deinit();
-    const welcome_payload = try welcome.payloadAs(messages.SystemPayload);
+    const welcome_call = try welcome.call();
+    const welcome_payload = try welcome_call.paramsAs(messages.SystemPayload);
     try std.testing.expectEqualStrings("connected", welcome_payload.code);
 
     return ctx;
@@ -124,6 +132,7 @@ pub fn setupReadyClient(allocator: std.mem.Allocator, port: u16) !IntegrationCon
 pub const TestClient = struct {
     allocator: std.mem.Allocator,
     client: ws_client,
+    next_id: i64 = 1,
 
     pub const Config = struct {
         host: []const u8 = "127.0.0.1",
@@ -150,6 +159,7 @@ pub const TestClient = struct {
         return .{
             .allocator = allocator,
             .client = client,
+            .next_id = 1,
         };
     }
 
@@ -162,8 +172,18 @@ pub const TestClient = struct {
         self.client.close(.{}) catch {};
     }
 
-    pub fn sendMessage(self: *TestClient, type_name: []const u8, payload: anytype) !void {
-        const frame = try messages.encodeMessage(self.allocator, type_name, payload);
+    pub fn sendRequest(self: *TestClient, method: []const u8, params: anytype) !messages.Id {
+        const id_value = self.next_id;
+        self.next_id += 1;
+        const id = messages.Id.fromInt(id_value);
+        const frame = try messages.encodeRequest(self.allocator, method, params, id);
+        defer self.allocator.free(frame);
+        try self.client.write(frame);
+        return id;
+    }
+
+    pub fn sendNotification(self: *TestClient, method: []const u8, params: anytype) !void {
+        const frame = try messages.encodeNotification(self.allocator, method, params);
         defer self.allocator.free(frame);
         try self.client.write(frame);
     }
@@ -179,7 +199,7 @@ pub const TestClient = struct {
         self: *TestClient,
         allocator: std.mem.Allocator,
         deadline_ms: i128,
-    ) (ClientError || error{Timeout} || anyerror)!messages.Message {
+    ) (ClientError || error{Timeout} || anyerror)!messages.Frame {
         while (true) {
             const now = std.time.milliTimestamp();
             if (now >= deadline_ms) return error.Timeout;
@@ -205,7 +225,7 @@ pub const TestClient = struct {
                 defer self.client.done(frame);
                 switch (frame.type) {
                     .text => {
-                        return try messages.parseMessage(allocator, frame.data);
+                        return try messages.parseFrame(allocator, frame.data);
                     },
                     .binary => return error.UnexpectedBinaryPayload,
                     .close => return error.ConnectionClosed,
@@ -223,31 +243,80 @@ pub const TestClient = struct {
         self: *TestClient,
         allocator: std.mem.Allocator,
         timeout_ms: u32,
-    ) (ClientError || anyerror)!messages.Message {
+    ) (ClientError || anyerror)!messages.Frame {
         const deadline = std.time.milliTimestamp() + @as(i128, timeout_ms);
         return self.receiveWithDeadline(allocator, deadline) catch |err| switch (err) {
             error.Timeout => ClientError.Timeout,
         };
     }
 
-    pub fn expect(
+    pub fn expectCall(
         self: *TestClient,
         allocator: std.mem.Allocator,
         timeout_ms: u32,
-        type_name: []const u8,
-    ) (ClientError || anyerror)!messages.Message {
+        method: []const u8,
+    ) (ClientError || anyerror)!messages.Frame {
         const deadline = std.time.milliTimestamp() + @as(i128, timeout_ms);
-
-        var message = self.receiveWithDeadline(allocator, deadline) catch |err| switch (err) {
-            error.Timeout => return error.Timeout,
+        var frame = self.receiveWithDeadline(allocator, deadline) catch |err| switch (err) {
+            error.Timeout => return ClientError.Timeout,
             else => return err,
         };
 
-        if (!std.mem.eql(u8, message.typeName(), type_name)) {
-            message.deinit();
-            return error.UnexpectedMessageType;
+        switch (frame.kind()) {
+            .call => {
+                const call = try frame.call();
+                if (!std.mem.eql(u8, call.methodName(), method)) {
+                    frame.deinit();
+                    return error.UnexpectedMessageType;
+                }
+            },
+            else => {
+                frame.deinit();
+                return error.UnexpectedMessageType;
+            },
         }
 
-        return message;
+        return frame;
+    }
+
+    pub fn expectResponse(
+        self: *TestClient,
+        allocator: std.mem.Allocator,
+        timeout_ms: u32,
+        id: messages.Id,
+    ) (ClientError || anyerror)!messages.Frame {
+        const deadline = std.time.milliTimestamp() + @as(i128, timeout_ms);
+        var frame = self.receiveWithDeadline(allocator, deadline) catch |err| switch (err) {
+            error.Timeout => return ClientError.Timeout,
+            else => return err,
+        };
+
+        switch (frame.kind()) {
+            .response => {
+                const response = try frame.response();
+                if (!messages.idsEqual(response.idValue(), id)) {
+                    frame.deinit();
+                    return error.UnexpectedMessageType;
+                }
+            },
+            .rpc_error => {
+                const err = try frame.rpcError();
+                if (err.idValue()) |err_id| {
+                    if (!messages.idsEqual(err_id, id)) {
+                        frame.deinit();
+                        return error.UnexpectedMessageType;
+                    }
+                } else {
+                    frame.deinit();
+                    return error.UnexpectedMessageType;
+                }
+            },
+            else => {
+                frame.deinit();
+                return error.UnexpectedMessageType;
+            },
+        }
+
+        return frame;
     }
 };

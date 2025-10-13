@@ -10,13 +10,16 @@ pub const ws_test_client = @import("ws_test_client.zig");
 test "messages roundtrip" {
     const allocator = std.testing.allocator;
     const raw =
-        \\{"type":"ping","data":{}}
+        \\{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}
     ;
 
-    var parsed = try messages.parseMessage(allocator, raw);
-    defer parsed.deinit();
+    var frame = try messages.parseFrame(allocator, raw);
+    defer frame.deinit();
 
-    try std.testing.expectEqualStrings("ping", parsed.typeName());
+    try std.testing.expectEqual(messages.PayloadTag.call, frame.kind());
+    const call = try frame.call();
+    try std.testing.expect(!call.isNotification());
+    try std.testing.expectEqualStrings("ping", call.methodName());
 }
 
 test "all module tests are wired" {

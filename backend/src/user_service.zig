@@ -309,15 +309,15 @@ test "integration: user register and login" {
         fn run(ctx: *ws_test_client.IntegrationContext) !void {
             const allocator = ctx.allocator;
 
-            try ctx.client.sendMessage("user_register", messages.UserRegisterPayload{ .username = "Alice" });
-            const user_id = try expectUserResponse(allocator, &ctx.client, "user_register", "Alice");
+            const register_id = try ctx.client.sendRequest("user_register", messages.UserRegisterPayload{ .username = "Alice" });
+            const user_id = try expectUserResponse(allocator, &ctx.client, register_id, "Alice");
 
-            try ctx.client.sendMessage("user_login", messages.UserLoginPayload{ .username = "Alice" });
-            const login_id = try expectUserResponse(allocator, &ctx.client, "user_login", "Alice");
+            const login_request_id = try ctx.client.sendRequest("user_login", messages.UserLoginPayload{ .username = "Alice" });
+            const login_id = try expectUserResponse(allocator, &ctx.client, login_request_id, "Alice");
             try std.testing.expectEqual(user_id, login_id);
 
-            try ctx.client.sendMessage("user_get", messages.UserGetPayload{ .username = "Alice" });
-            const get_id = try expectUserResponse(allocator, &ctx.client, "user_get", "Alice");
+            const get_request_id = try ctx.client.sendRequest("user_get", messages.UserGetPayload{ .username = "Alice" });
+            const get_id = try expectUserResponse(allocator, &ctx.client, get_request_id, "Alice");
             try std.testing.expectEqual(user_id, get_id);
         }
     }.run);
@@ -326,39 +326,31 @@ test "integration: user register and login" {
 fn expectUserResponse(
     allocator: std.mem.Allocator,
     client: *ws_test_client.TestClient,
-    expected_request: []const u8,
+    request_id: messages.Id,
     expected_username: []const u8,
 ) (ws_test_client.ClientError || PayloadError || anyerror)!i64 {
-    var response = try client.expect(allocator, 2000, "response");
-    defer response.deinit();
+    var frame = try client.expectResponse(allocator, 2000, request_id);
+    defer frame.deinit();
 
-    const payload_value = response.payload();
+    const response = switch (frame.kind()) {
+        .response => try frame.response(),
+        else => return PayloadError.InvalidPayload,
+    };
+
+    const payload_value = response.resultValue();
     const payload_obj = switch (payload_value) {
         .object => |obj| obj,
         else => return PayloadError.InvalidPayload,
     };
 
-    const request_value = payload_obj.get("request") orelse return PayloadError.InvalidPayload;
-    const request_str = switch (request_value) {
-        .string => |s| s,
-        else => return PayloadError.InvalidPayload,
-    };
-    try std.testing.expectEqualStrings(expected_request, request_str);
-
-    const data_value = payload_obj.get("data") orelse return PayloadError.InvalidPayload;
-    const data_obj = switch (data_value) {
-        .object => |obj| obj,
-        else => return PayloadError.InvalidPayload,
-    };
-
-    const username_value = data_obj.get("username") orelse return PayloadError.InvalidPayload;
+    const username_value = payload_obj.get("username") orelse return PayloadError.InvalidPayload;
     const username_str = switch (username_value) {
         .string => |s| s,
         else => return PayloadError.InvalidPayload,
     };
     try std.testing.expectEqualStrings(expected_username, username_str);
 
-    const id_value = data_obj.get("id") orelse return PayloadError.InvalidPayload;
+    const id_value = payload_obj.get("id") orelse return PayloadError.InvalidPayload;
     const id_int = switch (id_value) {
         .integer => |i| i,
         .float => |f| @as(i64, @intFromFloat(f)),

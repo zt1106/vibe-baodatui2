@@ -19,7 +19,7 @@ const Player = struct {
     score: u32 = 0,
 };
 
-const HandlerFn = *const fn (*GameApp, *ws.Conn, *ConnectionState, *messages.Message) anyerror!void;
+const HandlerFn = *const fn (*GameApp, *ws.Conn, *ConnectionState, *messages.Call) anyerror!void;
 
 pub const RegisterHandlerError = error{HandlerExists} || std.mem.Allocator.Error;
 
@@ -135,34 +135,38 @@ pub const GameApp = struct {
     pub fn onConnect(self: *GameApp, conn: *ws.Conn, state: *ConnectionState) !void {
         _ = state;
         log.info("connection established", .{});
-        try self.sendMessage(conn, "system", .{
+        try self.sendNotification(conn, "system", .{
             .code = "connected",
             .message = "Welcome to the game server",
         });
     }
 
-    pub fn onMessage(
+    pub fn onCall(
         self: *GameApp,
         conn: *ws.Conn,
         state: *ConnectionState,
-        message: *messages.Message,
+        call: *messages.Call,
     ) !void {
-        const type_name = message.typeName();
+        const method_name = call.methodName();
 
         self.mutex.lock();
-        const handler = self.handlers.get(type_name);
+        const handler = self.handlers.get(method_name);
         self.mutex.unlock();
 
         if (handler) |func| {
-            try func(self, conn, state, message);
+            func(self, conn, state, call) catch |err| {
+                log.err("handler error: {}", .{err});
+                if (call.idValue()) |id| {
+                    try self.sendError(conn, id, -32000, @errorName(err));
+                }
+            };
             return;
         }
 
-        log.warn("unknown message type: {s}", .{type_name});
-        try self.sendMessage(conn, "system", .{
-            .code = "unknown_type",
-            .message = "Unrecognized message type",
-        });
+        log.warn("unknown method: {s}", .{method_name});
+        if (call.idValue()) |id| {
+            try self.sendError(conn, id, -32601, "Method not found");
+        }
     }
 
     pub fn onDisconnect(self: *GameApp, state: *ConnectionState) void {
@@ -223,14 +227,22 @@ pub const GameApp = struct {
         handler: fn (*GameApp, *ws.Conn, *ConnectionState, Payload) anyerror!void,
     ) RegisterHandlerError!void {
         const thunk = struct {
+            const func = handler;
             fn call(
                 app: *GameApp,
                 conn: *ws.Conn,
                 state: *ConnectionState,
-                message: *messages.Message,
+                rpc_call: *messages.Call,
             ) anyerror!void {
-                const payload = try message.payloadAs(Payload);
-                try handler(app, conn, state, payload);
+                const payload = rpc_call.paramsAs(Payload) catch |err| {
+                    if (rpc_call.idValue()) |id| {
+                        try app.sendError(conn, id, -32602, "Invalid params");
+                    } else {
+                        log.warn("invalid params for notification method {s}: {}", .{ rpc_call.methodName(), err });
+                    }
+                    return;
+                };
+                try func(app, conn, state, payload);
             }
         };
 
@@ -244,31 +256,35 @@ pub const GameApp = struct {
         name: []const u8,
         handler: fn (*GameApp, *ws.Conn, *ConnectionState, RequestPayload) anyerror!ResponsePayload,
     ) RegisterHandlerError!void {
-        const ResponseMessage = messages.ResponseEnvelope(ResponsePayload);
-
         const thunk = struct {
+            const func = handler;
             fn call(
                 app: *GameApp,
                 conn: *ws.Conn,
                 state: *ConnectionState,
-                message: *messages.Message,
+                rpc_call: *messages.Call,
             ) anyerror!void {
-                const payload = try message.payloadAs(RequestPayload);
-                const request_type = message.typeName();
+                const payload = rpc_call.paramsAs(RequestPayload) catch |err| {
+                    if (rpc_call.idValue()) |id| {
+                        try app.sendError(conn, id, -32602, "Invalid params");
+                    } else {
+                        log.warn("invalid params for notification method {s}: {}", .{ rpc_call.methodName(), err });
+                    }
+                    return;
+                };
 
-                if (ResponsePayload == void) {
-                    try handler(app, conn, state, payload);
-                    try app.sendMessage(conn, "response", ResponseMessage{
-                        .request = request_type,
-                    });
+                if (@typeInfo(ResponsePayload) == .void) {
+                    try func(app, conn, state, payload);
+                    if (rpc_call.idValue()) |id| {
+                        try app.sendResponseNull(conn, id);
+                    }
                     return;
                 }
 
-                const response = try handler(app, conn, state, payload);
-                try app.sendMessage(conn, "response", ResponseMessage{
-                    .request = request_type,
-                    .data = response,
-                });
+                const response = try func(app, conn, state, payload);
+                if (rpc_call.idValue()) |id| {
+                    try app.sendResponse(conn, id, response);
+                }
             }
         };
 
@@ -333,13 +349,46 @@ pub const GameApp = struct {
         };
     }
 
-    fn sendMessage(
+    fn sendNotification(
         self: *GameApp,
         conn: *ws.Conn,
-        type_name: []const u8,
-        payload: anytype,
+        method: []const u8,
+        params: anytype,
     ) !void {
-        const frame = try messages.encodeMessage(self.allocator, type_name, payload);
+        const frame = try messages.encodeNotification(self.allocator, method, params);
+        defer self.allocator.free(frame);
+        try conn.write(frame);
+    }
+
+    fn sendResponse(
+        self: *GameApp,
+        conn: *ws.Conn,
+        id: messages.Id,
+        result: anytype,
+    ) !void {
+        const frame = try messages.encodeResponse(self.allocator, id, result);
+        defer self.allocator.free(frame);
+        try conn.write(frame);
+    }
+
+    fn sendResponseNull(
+        self: *GameApp,
+        conn: *ws.Conn,
+        id: messages.Id,
+    ) !void {
+        const frame = try messages.encodeResponseNull(self.allocator, id);
+        defer self.allocator.free(frame);
+        try conn.write(frame);
+    }
+
+    fn sendError(
+        self: *GameApp,
+        conn: *ws.Conn,
+        id: ?messages.Id,
+        code: i64,
+        message: []const u8,
+    ) !void {
+        const frame = try messages.encodeError(self.allocator, id, code, message);
         defer self.allocator.free(frame);
         try conn.write(frame);
     }
@@ -354,17 +403,21 @@ fn handleRoomList(
     self: *GameApp,
     conn: *ws.Conn,
     _: *ConnectionState,
-    message: *messages.Message,
+    call: *messages.Call,
 ) anyerror!void {
-    _ = try message.payloadAs(messages.RoomListRequestPayload);
+    _ = call.paramsAs(messages.RoomListRequestPayload) catch |err| {
+        if (call.idValue()) |id| {
+            try self.sendError(conn, id, -32602, "Invalid params");
+        } else {
+            log.warn("invalid params for notification method {s}: {}", .{ call.methodName(), err });
+        }
+        return;
+    };
     var view = try self.room_service.listRooms(self.allocator);
     defer view.deinit();
-    const ResponseMessage = messages.ResponseEnvelope(messages.RoomListResponsePayload);
-    const response = ResponseMessage{
-        .request = message.typeName(),
-        .data = view.payload,
-    };
-    try self.sendMessage(conn, "response", response);
+    if (call.idValue()) |id| {
+        try self.sendResponse(conn, id, view.payload);
+    }
 }
 
 fn handleRoomCreate(

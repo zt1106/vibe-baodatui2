@@ -1,39 +1,158 @@
 const std = @import("std");
 
-const mem = std.mem;
+const meta = std.meta;
 const AllocWriter = std.io.Writer.Allocating;
 const JsonValue = std.json.Value;
 const JsonParseResult = std.json.Parsed(JsonValue);
 
-pub const Message = struct {
-    parsed: JsonParseResult,
-    type_name: []const u8,
-    data: JsonValue,
+pub const JsonRpcVersion = "2.0";
 
-    pub fn deinit(self: *Message) void {
-        self.parsed.deinit();
-        self.* = undefined;
+pub const FrameError = error{InvalidFrameKind};
+
+pub const Id = union(enum) {
+    integer: i64,
+    float: f64,
+    string: []const u8,
+    null: void,
+
+    pub fn fromInt(value: i64) Id {
+        return .{ .integer = value };
     }
 
-    pub fn typeName(self: *const Message) []const u8 {
-        return self.type_name;
+    pub fn fromString(value: []const u8) Id {
+        return .{ .string = value };
     }
 
-    pub fn payload(self: *const Message) JsonValue {
-        return self.data;
+    pub fn isNull(self: Id) bool {
+        return self == .null;
+    }
+};
+
+pub const NullId = Id{ .null = {} };
+
+pub const Payload = union(enum) {
+    call: Call,
+    response: Response,
+    rpc_error: Error,
+};
+
+pub const PayloadTag = meta.Tag(Payload);
+
+pub const Call = struct {
+    method: []const u8,
+    params: JsonValue,
+    id: ?Id,
+    arena: std.mem.Allocator,
+
+    pub fn methodName(self: *const Call) []const u8 {
+        return self.method;
     }
 
-    pub fn payloadAs(self: *Message, comptime T: type) !T {
+    pub fn idValue(self: *const Call) ?Id {
+        return self.id;
+    }
+
+    pub fn isNotification(self: *const Call) bool {
+        return self.id == null;
+    }
+
+    pub fn paramsValue(self: *const Call) JsonValue {
+        return self.params;
+    }
+
+    pub fn paramsAs(self: *Call, comptime T: type) !T {
         return try std.json.parseFromValueLeaky(
             T,
-            self.parsed.arena.allocator(),
-            self.data,
+            self.arena,
+            self.params,
             .{ .ignore_unknown_fields = true },
         );
     }
 };
 
-pub fn parseMessage(allocator: std.mem.Allocator, raw: []const u8) !Message {
+pub const Response = struct {
+    id: Id,
+    result: JsonValue,
+    arena: std.mem.Allocator,
+
+    pub fn idValue(self: *const Response) Id {
+        return self.id;
+    }
+
+    pub fn resultValue(self: *const Response) JsonValue {
+        return self.result;
+    }
+
+    pub fn resultAs(self: *Response, comptime T: type) !T {
+        return try std.json.parseFromValueLeaky(
+            T,
+            self.arena,
+            self.result,
+            .{ .ignore_unknown_fields = true },
+        );
+    }
+};
+
+pub const Error = struct {
+    id: ?Id,
+    code: i64,
+    message: []const u8,
+    data: ?JsonValue,
+    arena: std.mem.Allocator,
+
+    pub fn idValue(self: *const Error) ?Id {
+        return self.id;
+    }
+
+    pub fn messageValue(self: *const Error) []const u8 {
+        return self.message;
+    }
+
+    pub fn codeValue(self: *const Error) i64 {
+        return self.code;
+    }
+
+    pub fn dataValue(self: *const Error) ?JsonValue {
+        return self.data;
+    }
+};
+
+pub const Frame = struct {
+    parsed: JsonParseResult,
+    payload: Payload,
+
+    pub fn deinit(self: *Frame) void {
+        self.parsed.deinit();
+        self.* = undefined;
+    }
+
+    pub fn kind(self: *const Frame) PayloadTag {
+        return meta.activeTag(self.payload);
+    }
+
+    pub fn call(self: *Frame) !*Call {
+        return switch (self.payload) {
+            .call => |*c| c,
+            else => FrameError.InvalidFrameKind,
+        };
+    }
+
+    pub fn response(self: *Frame) !*Response {
+        return switch (self.payload) {
+            .response => |*r| r,
+            else => FrameError.InvalidFrameKind,
+        };
+    }
+
+    pub fn rpcError(self: *Frame) !*Error {
+        return switch (self.payload) {
+            .rpc_error => |*e| e,
+            else => FrameError.InvalidFrameKind,
+        };
+    }
+};
+
+pub fn parseFrame(allocator: std.mem.Allocator, raw: []const u8) !Frame {
     var parsed = try std.json.parseFromSlice(JsonValue, allocator, raw, .{});
     errdefer parsed.deinit();
 
@@ -43,25 +162,117 @@ pub fn parseMessage(allocator: std.mem.Allocator, raw: []const u8) !Message {
         else => return error.InvalidEnvelope,
     };
 
-    const type_value_ptr = envelope.get("type") orelse return error.MissingType;
-    const type_name = switch (type_value_ptr) {
-        .string => |name| name,
-        else => return error.InvalidTypeField,
+    const version_ptr = envelope.get("jsonrpc") orelse return error.MissingJsonRpcVersion;
+    const version = switch (version_ptr) {
+        .string => |value| value,
+        else => return error.InvalidJsonRpcVersion,
     };
 
-    const payload_value = envelope.get("data") orelse JsonValue{ .null = {} };
+    if (!std.mem.eql(u8, version, JsonRpcVersion)) {
+        return error.InvalidJsonRpcVersion;
+    }
 
-    return Message{
-        .parsed = parsed,
-        .type_name = type_name,
-        .data = payload_value,
+    if (envelope.get("method")) |method_ptr| {
+        const method = switch (method_ptr) {
+            .string => |value| value,
+            else => return error.InvalidMethodField,
+        };
+
+        const params = envelope.get("params") orelse JsonValue{ .null = {} };
+        var id_opt: ?Id = null;
+        if (envelope.get("id")) |id_ptr| {
+            id_opt = try parseId(id_ptr);
+        }
+
+        return Frame{
+            .parsed = parsed,
+            .payload = .{ .call = Call{
+                .method = method,
+                .params = params,
+                .id = id_opt,
+                .arena = parsed.arena.allocator(),
+            } },
+        };
+    }
+
+    if (envelope.get("error")) |error_ptr| {
+        const error_obj = switch (error_ptr) {
+            .object => |object| object,
+            else => return error.InvalidErrorField,
+        };
+
+        const code_value = error_obj.get("code") orelse return error.InvalidErrorField;
+        const code = switch (code_value) {
+            .integer => |value| value,
+            else => return error.InvalidErrorField,
+        };
+
+        const message_value = error_obj.get("message") orelse return error.InvalidErrorField;
+        const message = switch (message_value) {
+            .string => |value| value,
+            else => return error.InvalidErrorField,
+        };
+
+        var id_opt: ?Id = null;
+        if (envelope.get("id")) |id_ptr| {
+            id_opt = try parseId(id_ptr);
+        }
+
+        const data = error_obj.get("data");
+
+        return Frame{
+            .parsed = parsed,
+            .payload = .{ .rpc_error = Error{
+                .id = id_opt,
+                .code = code,
+                .message = message,
+                .data = data,
+                .arena = parsed.arena.allocator(),
+            } },
+        };
+    }
+
+    if (envelope.get("result")) |result_ptr| {
+        const id_ptr = envelope.get("id") orelse return error.MissingIdField;
+        const id_value = try parseId(id_ptr);
+
+        return Frame{
+            .parsed = parsed,
+            .payload = .{ .response = Response{
+                .id = id_value,
+                .result = result_ptr,
+                .arena = parsed.arena.allocator(),
+            } },
+        };
+    }
+
+    return error.InvalidFrameStructure;
+}
+
+fn parseId(value: JsonValue) !Id {
+    return switch (value) {
+        .integer => |int_value| Id{ .integer = int_value },
+        .float => |float_value| Id{ .float = float_value },
+        .string => |string_value| Id{ .string = string_value },
+        .null => NullId,
+        else => error.InvalidIdField,
     };
 }
 
-pub fn encodeMessage(
+fn writeId(stringify: *std.json.Stringify, id: Id) !void {
+    switch (id) {
+        .integer => |value| try stringify.write(value),
+        .float => |value| try stringify.write(value),
+        .string => |value| try stringify.write(value),
+        .null => try stringify.write(JsonValue{ .null = {} }),
+    }
+}
+
+pub fn encodeRequest(
     allocator: std.mem.Allocator,
-    type_name: []const u8,
-    payload: anytype,
+    method: []const u8,
+    params: anytype,
+    id: Id,
 ) ![]u8 {
     var aw = AllocWriter.init(allocator);
     defer aw.deinit();
@@ -72,40 +283,147 @@ pub fn encodeMessage(
     };
 
     try stringify.beginObject();
-    try stringify.objectField("type");
-    try stringify.write(type_name);
-    try stringify.objectField("data");
-
-    if (@TypeOf(payload) == void) {
-        try stringify.write(std.json.Value{ .null = {} });
-    } else {
-        try stringify.write(payload);
-    }
-
+    try stringify.objectField("jsonrpc");
+    try stringify.write(JsonRpcVersion);
+    try stringify.objectField("id");
+    try writeId(&stringify, id);
+    try stringify.objectField("method");
+    try stringify.write(method);
+    try stringify.objectField("params");
+    try stringify.write(params);
     try stringify.endObject();
 
     return try aw.toOwnedSlice();
 }
 
-pub const JoinPayload = struct {
-    name: []const u8,
-};
+pub fn encodeNotification(
+    allocator: std.mem.Allocator,
+    method: []const u8,
+    params: anytype,
+) ![]u8 {
+    var aw = AllocWriter.init(allocator);
+    defer aw.deinit();
 
-pub const ChatPayload = struct {
+    var stringify = std.json.Stringify{
+        .writer = &aw.writer,
+        .options = .{ .whitespace = .minified },
+    };
+
+    try stringify.beginObject();
+    try stringify.objectField("jsonrpc");
+    try stringify.write(JsonRpcVersion);
+    try stringify.objectField("method");
+    try stringify.write(method);
+    try stringify.objectField("params");
+    try stringify.write(params);
+    try stringify.endObject();
+
+    return try aw.toOwnedSlice();
+}
+
+pub fn encodeResponse(
+    allocator: std.mem.Allocator,
+    id: Id,
+    result: anytype,
+) ![]u8 {
+    var aw = AllocWriter.init(allocator);
+    defer aw.deinit();
+
+    var stringify = std.json.Stringify{
+        .writer = &aw.writer,
+        .options = .{ .whitespace = .minified },
+    };
+
+    try stringify.beginObject();
+    try stringify.objectField("jsonrpc");
+    try stringify.write(JsonRpcVersion);
+    try stringify.objectField("id");
+    try writeId(&stringify, id);
+    try stringify.objectField("result");
+    try stringify.write(result);
+    try stringify.endObject();
+
+    return try aw.toOwnedSlice();
+}
+
+pub fn encodeResponseNull(
+    allocator: std.mem.Allocator,
+    id: Id,
+) ![]u8 {
+    return encodeResponse(allocator, id, JsonValue{ .null = {} });
+}
+
+pub fn encodeError(
+    allocator: std.mem.Allocator,
+    id: ?Id,
+    code: i64,
     message: []const u8,
-};
+) ![]u8 {
+    var aw = AllocWriter.init(allocator);
+    defer aw.deinit();
 
-pub const MovePayload = struct {
-    x: f32,
-    y: f32,
-};
+    var stringify = std.json.Stringify{
+        .writer = &aw.writer,
+        .options = .{ .whitespace = .minified },
+    };
 
-pub const PingPayload = struct {};
+    try stringify.beginObject();
+    try stringify.objectField("jsonrpc");
+    try stringify.write(JsonRpcVersion);
+    try stringify.objectField("id");
+    if (id) |value| {
+        try writeId(&stringify, value);
+    } else {
+        try stringify.write(JsonValue{ .null = {} });
+    }
+    try stringify.objectField("error");
+    try stringify.beginObject();
+    try stringify.objectField("code");
+    try stringify.write(code);
+    try stringify.objectField("message");
+    try stringify.write(message);
+    try stringify.endObject();
+    try stringify.endObject();
+
+    return try aw.toOwnedSlice();
+}
+
+pub fn idsEqual(a: Id, b: Id) bool {
+    if (meta.activeTag(a) != meta.activeTag(b)) return false;
+    return switch (a) {
+        .integer => |value| switch (b) {
+            .integer => |other| value == other,
+            else => unreachable,
+        },
+        .float => |value| switch (b) {
+            .float => |other| value == other,
+            else => unreachable,
+        },
+        .string => |value| switch (b) {
+            .string => |other| std.mem.eql(u8, value, other),
+            else => unreachable,
+        },
+        .null => true,
+    };
+}
+
+pub fn idToInt(id: Id) ?i64 {
+    return switch (id) {
+        .integer => |value| value,
+        .float => null,
+        .string => null,
+        .null => null,
+    };
+}
+
+pub const EmptyParams = struct {};
 
 pub const SystemPayload = struct {
     code: []const u8,
     message: []const u8,
 };
+
+pub const PingPayload = struct {};
 
 pub const RoomStatePayload = enum {
     waiting,
@@ -198,46 +516,44 @@ pub const UserDeleteResponsePayload = struct {
     username: []const u8,
 };
 
-pub fn ResponseEnvelope(comptime Payload: type) type {
-    return if (Payload == void)
-        struct {
-            request: []const u8,
-        }
-    else
-        struct {
-            request: []const u8,
-            data: Payload,
-        };
-}
-
-test "parse message envelope" {
+test "parse json-rpc call" {
     const allocator = std.testing.allocator;
     const raw =
-        \\{"type":"join","data":{"name":"Alice"}}
+        \\{"jsonrpc":"2.0","id":42,"method":"ping","params":{}}
     ;
 
-    var msg = try parseMessage(allocator, raw);
-    defer msg.deinit();
+    var frame = try parseFrame(allocator, raw);
+    defer frame.deinit();
 
-    try std.testing.expectEqualStrings("join", msg.typeName());
-    const join = try msg.payloadAs(JoinPayload);
-    try std.testing.expectEqualStrings("Alice", join.name);
+    try std.testing.expectEqual(PayloadTag.call, frame.kind());
+
+    const call = try frame.call();
+    try std.testing.expect(!call.isNotification());
+    try std.testing.expectEqualStrings("ping", call.methodName());
+
+    const payload = try call.paramsAs(PingPayload);
+    _ = payload;
+    const id = call.idValue().?;
+    try std.testing.expectEqual(@as(i64, 42), idToInt(id).?);
 }
 
-test "encode message envelope" {
+test "encode json-rpc response" {
     const allocator = std.testing.allocator;
-    const payload = SystemPayload{
+    const result = SystemPayload{
         .code = "ok",
         .message = "ready",
     };
 
-    const encoded = try encodeMessage(allocator, "system", payload);
+    const encoded = try encodeResponse(allocator, Id.fromInt(7), result);
     defer allocator.free(encoded);
 
-    var decoded = try parseMessage(allocator, encoded);
-    defer decoded.deinit();
+    var frame = try parseFrame(allocator, encoded);
+    defer frame.deinit();
 
-    try std.testing.expectEqualStrings("system", decoded.typeName());
-    const sys = try decoded.payloadAs(SystemPayload);
-    try std.testing.expectEqualStrings(payload.message, sys.message);
+    try std.testing.expectEqual(PayloadTag.response, frame.kind());
+
+    const response = try frame.response();
+    try std.testing.expect(idsEqual(response.idValue(), Id.fromInt(7)));
+    const decoded = try response.resultAs(SystemPayload);
+    try std.testing.expectEqualStrings(result.message, decoded.message);
 }
