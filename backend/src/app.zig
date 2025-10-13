@@ -43,34 +43,10 @@ pub const GameApp = struct {
 
         try self.ensureSchema();
         try self.registerRequestHandlerTyped(
-            messages.UserRegisterPayload,
-            messages.UserResponsePayload,
-            "user_register",
-            handleUserRegister,
-        );
-        try self.registerRequestHandlerTyped(
-            messages.UserLoginPayload,
-            messages.UserResponsePayload,
-            "user_login",
-            handleUserLogin,
-        );
-        try self.registerRequestHandlerTyped(
-            messages.UserGetPayload,
-            messages.UserResponsePayload,
-            "user_get",
-            handleUserGet,
-        );
-        try self.registerRequestHandlerTyped(
-            messages.UserUpdatePayload,
-            messages.UserResponsePayload,
-            "user_update",
-            handleUserUpdate,
-        );
-        try self.registerRequestHandlerTyped(
-            messages.UserDeletePayload,
-            messages.UserDeleteResponsePayload,
-            "user_delete",
-            handleUserDelete,
+            messages.UserSetNamePayload,
+            messages.UserInfoPayload,
+            "user_set_name",
+            handleUserSetName,
         );
         try self.registerRequestHandlerTyped(
             messages.PingPayload,
@@ -291,49 +267,13 @@ pub const GameApp = struct {
         try self.registerHandler(name, thunk.call);
     }
 
-    fn handleUserRegister(
+    fn handleUserSetName(
         self: *GameApp,
         _: *ws.Conn,
         state: *ConnectionState,
-        payload: messages.UserRegisterPayload,
-    ) !messages.UserResponsePayload {
-        return self.user_service.handleRegister(state, payload);
-    }
-
-    fn handleUserLogin(
-        self: *GameApp,
-        _: *ws.Conn,
-        state: *ConnectionState,
-        payload: messages.UserLoginPayload,
-    ) !messages.UserResponsePayload {
-        return self.user_service.handleLogin(state, payload);
-    }
-
-    fn handleUserGet(
-        self: *GameApp,
-        _: *ws.Conn,
-        _: *ConnectionState,
-        payload: messages.UserGetPayload,
-    ) !messages.UserResponsePayload {
-        return self.user_service.handleGet(payload);
-    }
-
-    fn handleUserUpdate(
-        self: *GameApp,
-        _: *ws.Conn,
-        state: *ConnectionState,
-        payload: messages.UserUpdatePayload,
-    ) !messages.UserResponsePayload {
-        return self.user_service.handleUpdate(state, payload);
-    }
-
-    fn handleUserDelete(
-        self: *GameApp,
-        _: *ws.Conn,
-        state: *ConnectionState,
-        payload: messages.UserDeletePayload,
-    ) !messages.UserDeleteResponsePayload {
-        return self.user_service.handleDelete(state, payload);
+        payload: messages.UserSetNamePayload,
+    ) !messages.UserInfoPayload {
+        return self.user_service.handleSetName(state, payload);
     }
 
     fn handlePing(

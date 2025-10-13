@@ -600,7 +600,7 @@ test "integration: room lobby flow" {
             const allocator = ctx.allocator;
             const host = &ctx.client;
 
-            const register_id = try host.sendRequest("user_register", messages.UserRegisterPayload{ .username = "Alice" });
+            const register_id = try host.sendRequest("user_set_name", messages.UserSetNamePayload{ .nickname = "Alice" });
             const host_id = try expectUserResponseId(allocator, host, register_id, "Alice");
 
             const create_id = try host.sendRequest(
@@ -652,7 +652,7 @@ test "integration: room lobby flow" {
             const guest_welcome_payload = try guest_welcome_call.paramsAs(messages.SystemPayload);
             try std.testing.expectEqualStrings("connected", guest_welcome_payload.code);
 
-            const guest_register_id = try guest.sendRequest("user_register", messages.UserRegisterPayload{ .username = "Bob" });
+            const guest_register_id = try guest.sendRequest("user_set_name", messages.UserSetNamePayload{ .nickname = "Bob" });
             const guest_id = try expectUserResponseId(allocator, &guest, guest_register_id, "Bob");
 
             const join_id = try guest.sendRequest("room_join", messages.RoomJoinPayload{ .room_id = room_id });

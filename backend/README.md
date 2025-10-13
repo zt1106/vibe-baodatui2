@@ -78,24 +78,20 @@ Request/response pairs return a `type` of `response` with the original request n
 Handlers that produce no payload still emit the envelope with only the `request` field.
 
 ### System Messages
-- `connected` – emitted once after the handshake completes.
-- `invalid_message` – parsing failed; payload contains `"Message could not be parsed"`.
-- `unknown_type` – no handler registered for `message.type`.
-- `handler_error` – downstream service threw a Zig error. The `message` field contains the error tag (e.g. `NotLoggedIn`, `RoomFull`, `UserExists`).
+- `connected` – JSON-RPC notification with method `system` and payload `{ "code": "connected", "message": "Welcome to the game server" }`.
+- `method not found` – JSON-RPC error `-32601` returned when a client calls an unknown method.
+- `invalid params` – JSON-RPC error `-32602` if a request payload fails validation.
+- `handler error` – JSON-RPC error `-32000` with the Zig error tag in the `message` field (e.g. `NotLoggedIn`, `RoomFull`, `UserExists`).
 
 ## User Management Messages
-| Message type | Request payload (`data`) | Response (`type: "response"`) | Notes |
+| Method | Request params | Response (JSON-RPC result) | Notes |
 | --- | --- | --- | --- |
-| `user_register` | `{ "username": "Alice" }` | `data: { "id": number, "username": "Alice" }` | Normalizes whitespace, rejects duplicates. Also binds the user to the connection. |
-| `user_login` | `{ "username": "Alice" }` | Same as above | Ensures the user exists and re-associates IDs with the connection. |
-| `user_get` | `{ "username": "Alice" }` | Same as above | Pure lookup; does not mutate connection state. |
-| `user_update` | `{ "username": "Alice", "new_username": "Alice B" }` | Updated user payload | Renames if the new handle is available and updates the live connection copy. |
-| `user_delete` | `{ "username": "Alice" }` | `data: { "username": "Alice" }` | Removes the user and clears matching connection state. |
+| `user_set_name` | `{ "nickname": "Alice" }` | `{ "id": number, "username": "Alice" }` | Trims whitespace, enforces uniqueness, and either assigns or renames the caller’s guest identity. |
 
-Validation errors surface via `handler_error` codes: `InvalidUsername`, `UserExists`, or `UserNotFound`.
+Validation errors surface via JSON-RPC error codes with messages such as `InvalidUsername` or `UserExists`.
 
 ## Room Management Messages
-| Message type | Request payload (`data`) | Response (`type: "response"`) | Notes |
+| Method | Request params | Response (JSON-RPC result) | Notes |
 | --- | --- | --- | --- |
 | `room_list` | `{}` | `data: { "rooms": [...] }` | Returns snapshots of all rooms (id, name, state, occupancy). |
 | `room_create` | `{ "name": "Lobby 1", "player_limit": 4 }` | `data: RoomDetailPayload` | Host-only creation; enforces unique name and minimum limit (`>= 2`). |
@@ -107,9 +103,9 @@ Validation errors surface via `handler_error` codes: `InvalidUsername`, `UserExi
 Potential error codes include `NotLoggedIn`, `MissingUsername`, `AlreadyInRoom`, `RoomNameExists`, `RoomNotFound`, `RoomFull`, `RoomInProgress`, `NotInRoom`, `NotHost`, and `PlayersNotReady`.
 
 ## Utility Messages
-| Message type | Request payload (`data`) | Response | Notes |
+| Method | Request params | Response | Notes |
 | --- | --- | --- | --- |
-| `ping` | `{}` | `type: "response", data: { "request": "ping", "data": { "code": "pong", "message": "Heartbeat ok" } }` | Simple health check to keep connections alive. |
+| `ping` | `{}` | JSON-RPC result `{ "code": "pong", "message": "Heartbeat ok" }` | Simple health check to keep connections alive. |
 
 ## Testing Support
 - `ws_test_client.zig` provides a synchronous WebSocket test client that can send protocol messages, await typed responses, and validate payloads. Integration helpers (`withReadyClient`) spin up a fully wired server in a temp directory, ensuring filesystem isolation for tests that depend on the current working directory.

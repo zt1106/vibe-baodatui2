@@ -79,125 +79,38 @@ theme_override_font_sizes/font_size = 42
 
 [node name="Subtitle" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox"]
 layout_mode = 2
-text = "Log in to continue or create a new account to join the fun."
+text = "Pick a nickname to appear in the lobby and at the table."
 horizontal_alignment = 1
 autowrap_mode = 2
 theme_override_font_sizes/font_size = 20
 
-[node name="TabContainer" type="TabContainer" parent="CenterContainer/Panel/MarginContainer/VBox"]
+[node name="Form" type="VBoxContainer" parent="CenterContainer/Panel/MarginContainer/VBox"]
 layout_mode = 2
 size_flags_vertical = 3
-size_flags_stretch_ratio = 1.5
-theme_override_font_sizes/tab_title_font_size = 22
-
-[node name="Login" type="VBoxContainer" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer"]
-layout_mode = 2
-offset_right = 620.0
-offset_bottom = 300.0
 theme_override_constants/separation = 18
 
-[node name="LoginUsernameLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Login"]
+[node name="NameLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox/Form"]
 layout_mode = 2
-text = "Username"
+text = "Display Name"
 theme_override_font_sizes/font_size = 18
 
-[node name="LoginUsername" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Login"]
+[node name="NicknameInput" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBox/Form"]
 layout_mode = 2
-placeholder_text = "Enter your username"
-min_size = Vector2(0, 44)
-theme_override_font_sizes/font_size = 18
-
-[node name="LoginPasswordLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Login"]
-layout_mode = 2
-text = "Password"
-theme_override_font_sizes/font_size = 18
-
-[node name="LoginPassword" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Login"]
-layout_mode = 2
-placeholder_text = "Enter your password"
-secret = true
-min_size = Vector2(0, 44)
-theme_override_font_sizes/font_size = 18
-
-[node name="RememberContainer" type="HBoxContainer" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Login"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="Remember" type="CheckBox" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Login/RememberContainer"]
-layout_mode = 2
-text = "Remember me"
-theme_override_font_sizes/font_size = 16
-
-[node name="ForgotPassword" type="Button" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Login/RememberContainer"]
-layout_mode = 2
-text = "Forgot password?"
-size_flags_horizontal = 1
-flat = true
-theme_override_font_sizes/font_size = 16
-
-[node name="LoginButton" type="Button" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Login"]
-layout_mode = 2
-text = "Log In"
-theme_override_font_sizes/font_size = 22
+placeholder_text = "Choose a name visible to other players"
 min_size = Vector2(0, 48)
-
-[node name="Register" type="VBoxContainer" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer"]
-layout_mode = 2
-offset_right = 620.0
-offset_bottom = 300.0
-theme_override_constants/separation = 18
-
-[node name="RegisterUsernameLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Register"]
-layout_mode = 2
-text = "Username"
 theme_override_font_sizes/font_size = 18
 
-[node name="RegisterUsername" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Register"]
+[node name="JoinButton" type="Button" parent="CenterContainer/Panel/MarginContainer/VBox/Form"]
 layout_mode = 2
-placeholder_text = "Choose a username"
-min_size = Vector2(0, 44)
-theme_override_font_sizes/font_size = 18
-
-[node name="RegisterEmailLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Register"]
-layout_mode = 2
-text = "Email"
-theme_override_font_sizes/font_size = 18
-
-[node name="RegisterEmail" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Register"]
-layout_mode = 2
-placeholder_text = "name@example.com"
-min_size = Vector2(0, 44)
-theme_override_font_sizes/font_size = 18
-
-[node name="RegisterPasswordLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Register"]
-layout_mode = 2
-text = "Password"
-theme_override_font_sizes/font_size = 18
-
-[node name="RegisterPassword" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Register"]
-layout_mode = 2
-placeholder_text = "Create a password"
-secret = true
-min_size = Vector2(0, 44)
-theme_override_font_sizes/font_size = 18
-
-[node name="RegisterConfirmLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Register"]
-layout_mode = 2
-text = "Confirm Password"
-theme_override_font_sizes/font_size = 18
-
-[node name="RegisterConfirm" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Register"]
-layout_mode = 2
-placeholder_text = "Confirm your password"
-secret = true
-min_size = Vector2(0, 44)
-theme_override_font_sizes/font_size = 18
-
-[node name="RegisterButton" type="Button" parent="CenterContainer/Panel/MarginContainer/VBox/TabContainer/Register"]
-layout_mode = 2
-text = "Create Account"
+text = "Join as Guest"
 theme_override_font_sizes/font_size = 22
-min_size = Vector2(0, 48)
+min_size = Vector2(0, 52)
+
+[node name="Hint" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox/Form"]
+layout_mode = 2
+text = "No passwords or accounts required — just pick a nickname and jump in."
+autowrap_mode = 2
+theme_override_font_sizes/font_size = 16
 
 [node name="ErrorDialog" type="AcceptDialog" parent="."]
 visible = false

@@ -42,73 +42,44 @@ pub const Service = struct {
         _ = self;
     }
 
-    pub fn handleRegister(
+    pub fn handleSetName(
         self: *Service,
         state: anytype,
-        payload: messages.UserRegisterPayload,
-    ) (Error || std.mem.Allocator.Error)!messages.UserResponsePayload {
-        const username = try normalizeUsername(payload.username);
-        const user = try self.createUser(username);
-        try self.assignToConnection(state, username, user.id);
+        payload: messages.UserSetNamePayload,
+    ) (Error || std.mem.Allocator.Error)!messages.UserInfoPayload {
+        comptime ensureStatePointer(@TypeOf(state));
+
+        const nickname = try normalizeNickname(payload.nickname);
+
+        if (state.*.user_id) |id| {
+            const current_ptr = state.*.user_name;
+            if (current_ptr) |current| {
+                if (std.mem.eql(u8, current, nickname)) {
+                    return .{ .id = id, .username = current };
+                }
+                const user = try self.renameUser(current, nickname);
+                try self.updateConnectionIfMatches(state, current, nickname, user.id);
+                return .{
+                    .id = user.id,
+                    .username = state.*.user_name.?,
+                };
+            }
+
+            // Missing cached name; treat as fresh allocation after clearing the association.
+            self.removeUserById(id);
+            state.*.user_id = null;
+        }
+
+        if (state.*.user_name) |dangling| {
+            self.allocator.free(dangling);
+            state.*.user_name = null;
+        }
+
+        const user = try self.createUser(nickname);
+        try self.assignToConnection(state, nickname, user.id);
         return .{
             .id = user.id,
-            .username = username,
-        };
-    }
-
-    pub fn handleLogin(
-        self: *Service,
-        state: anytype,
-        payload: messages.UserLoginPayload,
-    ) (Error || std.mem.Allocator.Error)!messages.UserResponsePayload {
-        const username = try normalizeUsername(payload.username);
-        const user = try self.fetchUser(username);
-        try self.assignToConnection(state, username, user.id);
-        return .{
-            .id = user.id,
-            .username = username,
-        };
-    }
-
-    pub fn handleGet(
-        self: *Service,
-        payload: messages.UserGetPayload,
-    ) (Error || std.mem.Allocator.Error)!messages.UserResponsePayload {
-        const username = try normalizeUsername(payload.username);
-        const user = try self.fetchUser(username);
-        return .{
-            .id = user.id,
-            .username = username,
-        };
-    }
-
-    pub fn handleUpdate(
-        self: *Service,
-        state: anytype,
-        payload: messages.UserUpdatePayload,
-    ) (Error || std.mem.Allocator.Error)!messages.UserResponsePayload {
-        const current = try normalizeUsername(payload.username);
-        const desired = try normalizeUsername(payload.new_username);
-        const user = try self.renameUser(current, desired);
-
-        try self.updateConnectionIfMatches(state, current, desired, user.id);
-
-        return .{
-            .id = user.id,
-            .username = desired,
-        };
-    }
-
-    pub fn handleDelete(
-        self: *Service,
-        state: anytype,
-        payload: messages.UserDeletePayload,
-    ) (Error || std.mem.Allocator.Error)!messages.UserDeleteResponsePayload {
-        const username = try normalizeUsername(payload.username);
-        try self.deleteUser(username);
-        self.clearConnectionIfMatches(state, username);
-        return .{
-            .username = username,
+            .username = state.*.user_name.?,
         };
     }
 
@@ -130,14 +101,6 @@ pub const Service = struct {
 
         try self.users.put(name_copy, entry);
         self.next_id += 1;
-        return User{ .id = entry.id };
-    }
-
-    fn fetchUser(
-        self: *Service,
-        username: []const u8,
-    ) Error!User {
-        const entry = self.users.get(username) orelse return Error.UserNotFound;
         return User{ .id = entry.id };
     }
 
@@ -164,6 +127,18 @@ pub const Service = struct {
     ) Error!void {
         const removed = self.users.fetchRemove(username) orelse return Error.UserNotFound;
         self.allocator.free(removed.value.name_storage);
+    }
+
+    fn removeUserById(self: *Service, id: i64) void {
+        var iterator = self.users.iterator();
+        while (iterator.next()) |entry| {
+            if (entry.value_ptr.*.id == id) {
+                const key_slice = entry.key_ptr.*;
+                const removed = self.users.fetchRemove(key_slice) orelse return;
+                self.allocator.free(removed.value.name_storage);
+                return;
+            }
+        }
     }
 
     fn assignToConnection(
@@ -229,8 +204,8 @@ pub const Service = struct {
     }
 };
 
-fn normalizeUsername(username: []const u8) Error![]const u8 {
-    const trimmed = std.mem.trim(u8, username, " \t\r\n");
+fn normalizeNickname(raw: []const u8) Error![]const u8 {
+    const trimmed = std.mem.trim(u8, raw, " \t\r\n");
     if (trimmed.len == 0) {
         return Error.InvalidUsername;
     }
@@ -262,63 +237,48 @@ test "user service lifecycle operations" {
         user_id: ?i64 = null,
     };
 
-    var register_state = TestState{};
-    defer if (register_state.user_name) |name| allocator.free(name);
+    var first_state = TestState{};
+    defer if (first_state.user_name) |name| allocator.free(name);
 
-    const registered = try service.handleRegister(&register_state, .{ .username = " Alice " });
-    try std.testing.expect(registered.id > 0);
-    try std.testing.expectEqualStrings("Alice", registered.username);
-    try std.testing.expect(register_state.user_id != null);
-    try std.testing.expectEqual(registered.id, register_state.user_id.?);
-    try std.testing.expectEqualStrings("Alice", register_state.user_name.?);
+    const first = try service.handleSetName(&first_state, .{ .nickname = " Alice " });
+    try std.testing.expect(first.id > 0);
+    try std.testing.expectEqualStrings("Alice", first.username);
+    try std.testing.expectEqual(first.id, first_state.user_id.?);
+    try std.testing.expectEqualStrings("Alice", first_state.user_name.?);
 
-    var login_state = TestState{};
-    defer if (login_state.user_name) |name| allocator.free(name);
-    const logged_in = try service.handleLogin(&login_state, .{ .username = " Alice " });
-    try std.testing.expectEqual(registered.id, logged_in.id);
-    try std.testing.expectEqualStrings("Alice", logged_in.username);
-    try std.testing.expectEqual(registered.id, login_state.user_id.?);
-    try std.testing.expectEqualStrings("Alice", login_state.user_name.?);
+    const unchanged = try service.handleSetName(&first_state, .{ .nickname = "Alice" });
+    try std.testing.expectEqual(first.id, unchanged.id);
+    try std.testing.expectEqualStrings("Alice", unchanged.username);
 
-    const fetched = try service.handleGet(.{ .username = "Alice" });
-    try std.testing.expectEqual(registered.id, fetched.id);
-    try std.testing.expectEqualStrings("Alice", fetched.username);
+    const renamed = try service.handleSetName(&first_state, .{ .nickname = "Alice Updated" });
+    try std.testing.expectEqual(first.id, renamed.id);
+    try std.testing.expectEqualStrings("Alice Updated", renamed.username);
+    try std.testing.expectEqualStrings("Alice Updated", first_state.user_name.?);
 
-    const updated = try service.handleUpdate(&login_state, .{
-        .username = "Alice",
-        .new_username = "Alice Updated",
-    });
-    try std.testing.expectEqual(registered.id, updated.id);
-    try std.testing.expectEqualStrings("Alice Updated", updated.username);
-    try std.testing.expectEqualStrings("Alice Updated", login_state.user_name.?);
+    var second_state = TestState{};
+    defer if (second_state.user_name) |name| allocator.free(name);
+    try std.testing.expectError(Error.UserExists, service.handleSetName(&second_state, .{ .nickname = "Alice Updated" }));
 
-    const deleted = try service.handleDelete(&login_state, .{ .username = "Alice Updated" });
-    try std.testing.expectEqualStrings("Alice Updated", deleted.username);
-    try std.testing.expect(login_state.user_name == null);
-    try std.testing.expect(login_state.user_id == null);
-
-    try std.testing.expectError(Error.UserNotFound, service.handleGet(.{ .username = "Alice Updated" }));
+    const second = try service.handleSetName(&second_state, .{ .nickname = "Bob" });
+    try std.testing.expect(second.id > 0);
+    try std.testing.expectEqualStrings("Bob", second.username);
 
     var invalid_state = TestState{};
     defer if (invalid_state.user_name) |name| allocator.free(name);
-    try std.testing.expectError(Error.InvalidUsername, service.handleRegister(&invalid_state, .{ .username = "   " }));
+    try std.testing.expectError(Error.InvalidUsername, service.handleSetName(&invalid_state, .{ .nickname = "   " }));
 }
 
-test "integration: user register and login" {
+test "integration: user set name and rename" {
     try ws_test_client.withReadyClient(22021, struct {
         fn run(ctx: *ws_test_client.IntegrationContext) !void {
             const allocator = ctx.allocator;
 
-            const register_id = try ctx.client.sendRequest("user_register", messages.UserRegisterPayload{ .username = "Alice" });
-            const user_id = try expectUserResponse(allocator, &ctx.client, register_id, "Alice");
+            const set_id = try ctx.client.sendRequest("user_set_name", messages.UserSetNamePayload{ .nickname = "Alice" });
+            const user_id = try expectUserResponse(allocator, &ctx.client, set_id, "Alice");
 
-            const login_request_id = try ctx.client.sendRequest("user_login", messages.UserLoginPayload{ .username = "Alice" });
-            const login_id = try expectUserResponse(allocator, &ctx.client, login_request_id, "Alice");
-            try std.testing.expectEqual(user_id, login_id);
-
-            const get_request_id = try ctx.client.sendRequest("user_get", messages.UserGetPayload{ .username = "Alice" });
-            const get_id = try expectUserResponse(allocator, &ctx.client, get_request_id, "Alice");
-            try std.testing.expectEqual(user_id, get_id);
+            const rename_id = try ctx.client.sendRequest("user_set_name", messages.UserSetNamePayload{ .nickname = "Alice Updated" });
+            const renamed_id = try expectUserResponse(allocator, &ctx.client, rename_id, "Alice Updated");
+            try std.testing.expectEqual(user_id, renamed_id);
         }
     }.run);
 }
