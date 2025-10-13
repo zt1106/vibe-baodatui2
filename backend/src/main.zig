@@ -2,28 +2,23 @@ const std = @import("std");
 const game_server = @import("game_server.zig");
 const app = @import("app.zig");
 
-pub const std_options = std.Options{
-    .log_level = std.log.default_level,
-    .logFn = customLog,
-};
-
-fn customLog(
+inline fn customLog(
     comptime level: std.log.Level,
-    comptime scope: @TypeOf(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {
     const color = levelColor(level);
-    const scope_name = if (scope == .default) "default" else @tagName(scope);
     const level_name = comptime level.asText();
-
-    var buf: [128]u8 = undefined;
+    var buf: [256]u8 = undefined;
     const stderr = std.debug.lockStderrWriter(&buf);
     defer std.debug.unlockStderrWriter();
-
+    if (std.debug.getSelfDebugInfo() catch null) |info| {
+        const addr = @returnAddress();
+        std.debug.printSourceAtAddress(info, stderr, addr, .no_color) catch {};
+    }
     nosuspend stderr.print(
-        "{s}[{s}] ({s}) ",
-        .{ color, level_name, scope_name },
+        "{s}[{s}] ",
+        .{ color, level_name },
     ) catch return;
     nosuspend stderr.print(format, args) catch return;
     nosuspend stderr.print("\x1b[0m\n", .{}) catch return;
@@ -38,13 +33,27 @@ fn levelColor(comptime level: std.log.Level) []const u8 {
     };
 }
 
-const log = std.log.scoped(.ws_server);
+pub fn log_info(comptime format: []const u8, args: anytype) void {
+    customLog(.info, format, args);
+}
+
+pub fn log_warn(comptime format: []const u8, args: anytype) void {
+    customLog(.warn, format, args);
+}
+
+pub fn log_err(comptime format: []const u8, args: anytype) void {
+    customLog(.err, format, args);
+}
+
+pub fn log_debug(comptime format: []const u8, args: anytype) void {
+    customLog(.debug, format, args);
+}
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer {
         if (gpa.deinit() == .leak) {
-            log.warn("allocator reported leaked memory", .{});
+            log_warn("allocator reported leaked memory", .{});
         }
     }
 
@@ -53,7 +62,7 @@ pub fn main() !void {
     var application = try app.GameApp.init(allocator);
     defer application.deinit();
 
-    log.info("booting game server", .{});
+    log_info("booting game server", .{});
 
     try game_server.run(&application, allocator, .{});
 }
