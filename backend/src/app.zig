@@ -289,6 +289,15 @@ pub const GameApp = struct {
         };
     }
 
+    fn logOutbound(self: *GameApp, frame: []const u8) void {
+        const pretty = messages.formatPrettyJson(self.allocator, frame) catch |err| {
+            log.info("WebSocket -> (raw, {s}): {s}", .{@errorName(err), frame});
+            return;
+        };
+        defer self.allocator.free(pretty);
+        log.info("WebSocket ->\n{s}", .{pretty});
+    }
+
     fn sendNotification(
         self: *GameApp,
         conn: *ws.Conn,
@@ -297,6 +306,7 @@ pub const GameApp = struct {
     ) !void {
         const frame = try messages.encodeNotification(self.allocator, method, params);
         defer self.allocator.free(frame);
+        self.logOutbound(frame);
         try conn.write(frame);
     }
 
@@ -308,6 +318,7 @@ pub const GameApp = struct {
     ) !void {
         const frame = try messages.encodeResponse(self.allocator, id, result);
         defer self.allocator.free(frame);
+        self.logOutbound(frame);
         try conn.write(frame);
     }
 
@@ -318,6 +329,7 @@ pub const GameApp = struct {
     ) !void {
         const frame = try messages.encodeResponseNull(self.allocator, id);
         defer self.allocator.free(frame);
+        self.logOutbound(frame);
         try conn.write(frame);
     }
 
@@ -330,6 +342,7 @@ pub const GameApp = struct {
     ) !void {
         const frame = try messages.encodeError(self.allocator, id, code, message);
         defer self.allocator.free(frame);
+        self.logOutbound(frame);
         try conn.write(frame);
     }
 

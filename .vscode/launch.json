@@ -9,7 +9,8 @@
 			"args": [],
 			"cwd": "${workspaceFolder}/backend",
 			"env": {},
-			"stopOnEntry": false
+			"stopOnEntry": false,
+			"preLaunchTask": "Build Backend"
 		}
 	]
 }

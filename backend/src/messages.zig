@@ -404,6 +404,16 @@ pub fn encodeError(
     return try aw.toOwnedSlice();
 }
 
+pub fn formatPrettyJson(allocator: std.mem.Allocator, raw: []const u8) ![]u8 {
+    var parsed = try std.json.parseFromSlice(JsonValue, allocator, raw, .{});
+    defer parsed.deinit();
+    return try std.fmt.allocPrint(
+        allocator,
+        "{f}",
+        .{std.json.fmt(parsed.value, .{ .whitespace = .indent_2 })},
+    );
+}
+
 pub fn idsEqual(a: Id, b: Id) bool {
     if (meta.activeTag(a) != meta.activeTag(b)) return false;
     return switch (a) {

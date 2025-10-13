@@ -85,6 +85,15 @@ const HandlerContext = struct {
     app: *app.GameApp,
 };
 
+fn logWebSocketMessage(direction: []const u8, allocator: std.mem.Allocator, payload: []const u8) void {
+    const pretty = messages.formatPrettyJson(allocator, payload) catch |err| {
+        log.info("{s} (raw, {s}): {s}", .{ direction, @errorName(err), payload });
+        return;
+    };
+    defer allocator.free(pretty);
+    log.info("{s}:\n{s}", .{ direction, pretty });
+}
+
 const Handler = struct {
     allocator: std.mem.Allocator,
     conn: *ws.Conn,
@@ -105,11 +114,15 @@ const Handler = struct {
     }
 
     pub fn clientMessage(self: *Handler, data: []const u8) !void {
-        var frame = messages.parseFrame(self.allocator, data) catch |err| {
+        // Some clients may include a trailing NUL byte in text frames; strip it to be tolerant.
+        const cleaned: []const u8 = if (data.len > 0 and data[data.len - 1] == 0) data[0 .. data.len - 1] else data;
+        logWebSocketMessage("WebSocket <-", self.allocator, cleaned);
+        var frame = messages.parseFrame(self.allocator, cleaned) catch |err| {
             const mapped = messages.mapParseFrameError(err);
             log.warn("invalid message from client: {} -> {d} {s}", .{ err, mapped.code, mapped.message });
             const error_frame = try messages.encodeError(self.allocator, null, mapped.code, mapped.message);
             defer self.allocator.free(error_frame);
+            logWebSocketMessage("WebSocket ->", self.allocator, error_frame);
             try self.conn.write(error_frame);
             return;
         };
@@ -123,6 +136,7 @@ const Handler = struct {
                     if (call.idValue()) |id| {
                         const error_frame = try messages.encodeError(self.allocator, id, messages.RpcErrorCodes.ServerError, @errorName(err));
                         defer self.allocator.free(error_frame);
+                        logWebSocketMessage("WebSocket ->", self.allocator, error_frame);
                         self.conn.write(error_frame) catch {};
                     }
                 };
