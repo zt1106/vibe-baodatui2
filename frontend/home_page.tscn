@@ -106,11 +106,161 @@ text = "Join as Guest"
 theme_override_font_sizes/font_size = 22
 min_size = Vector2(0, 52)
 
+[node name="MockLobbyButton" type="Button" parent="CenterContainer/Panel/MarginContainer/VBox/Form"]
+layout_mode = 2
+text = "Preview Lobby (Offline)"
+theme_override_font_sizes/font_size = 18
+min_size = Vector2(0, 48)
+
 [node name="Hint" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox/Form"]
 layout_mode = 2
 text = "No passwords or accounts required — just pick a nickname and jump in."
 autowrap_mode = 2
 theme_override_font_sizes/font_size = 16
+
+[node name="Lobby" type="Control" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 0.0
+offset_bottom = 0.0
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="Lobby"]
+layout_mode = 1
+anchors_preset = 15
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 0.0
+offset_bottom = 0.0
+theme_override_constants/margin_left = 40
+theme_override_constants/margin_top = 40
+theme_override_constants/margin_right = 40
+theme_override_constants/margin_bottom = 40
+
+[node name="LobbyVBox" type="VBoxContainer" parent="Lobby/MarginContainer"]
+layout_mode = 2
+offset_left = 40.0
+offset_top = 40.0
+offset_right = 1260.0
+offset_bottom = 660.0
+theme_override_constants/separation = 24
+
+[node name="LobbyTitle" type="Label" parent="Lobby/MarginContainer/LobbyVBox"]
+layout_mode = 2
+text = "Game Lobby"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 36
+
+[node name="Subtitle" type="Label" parent="Lobby/MarginContainer/LobbyVBox"]
+layout_mode = 2
+text = "Browse rooms, join other players, or host your own table."
+horizontal_alignment = 1
+autowrap_mode = 2
+theme_override_font_sizes/font_size = 18
+
+[node name="UserRow" type="HBoxContainer" parent="Lobby/MarginContainer/LobbyVBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="UserInfoLabel" type="Label" parent="Lobby/MarginContainer/LobbyVBox/UserRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Logged in as: -"
+theme_override_font_sizes/font_size = 18
+
+[node name="RefreshRoomsButton" type="Button" parent="Lobby/MarginContainer/LobbyVBox/UserRow"]
+layout_mode = 2
+text = "Refresh Rooms"
+theme_override_font_sizes/font_size = 18
+
+[node name="LobbyStatusLabel" type="Label" parent="Lobby/MarginContainer/LobbyVBox"]
+layout_mode = 2
+text = ""
+autowrap_mode = 2
+theme_override_font_sizes/font_size = 16
+
+[node name="RoomPanel" type="Panel" parent="Lobby/MarginContainer/LobbyVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="RoomPanelMargin" type="MarginContainer" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel"]
+layout_mode = 2
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 1204.0
+offset_bottom = 496.0
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="RoomPanelVBox" type="VBoxContainer" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="RoomListLabel" type="Label" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox"]
+layout_mode = 2
+text = "Available Rooms"
+theme_override_font_sizes/font_size = 20
+
+[node name="RoomList" type="ItemList" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 18
+select_mode = 1
+
+[node name="RoomActions" type="HBoxContainer" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="JoinRoomButton" type="Button" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox/RoomActions"]
+layout_mode = 2
+text = "Join Selected Room"
+theme_override_font_sizes/font_size = 18
+disabled = true
+
+[node name="RoomDetailLabel" type="RichTextLabel" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox"]
+layout_mode = 2
+fit_content_height = true
+scroll_active = false
+bbcode_enabled = true
+theme_override_font_sizes/normal_font_size = 16
+
+[node name="CreateRoomRow" type="HBoxContainer" parent="Lobby/MarginContainer/LobbyVBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="RoomNameInput" type="LineEdit" parent="Lobby/MarginContainer/LobbyVBox/CreateRoomRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Room name"
+theme_override_font_sizes/font_size = 18
+
+[node name="PlayerLimit" type="SpinBox" parent="Lobby/MarginContainer/LobbyVBox/CreateRoomRow"]
+layout_mode = 2
+custom_arrow_step = 1.0
+min_value = 2.0
+max_value = 9.0
+step = 1.0
+value = 4.0
+theme_override_font_sizes/font_size = 18
+
+[node name="CreateRoomButton" type="Button" parent="Lobby/MarginContainer/LobbyVBox/CreateRoomRow"]
+layout_mode = 2
+text = "Create & Host Room"
+theme_override_font_sizes/font_size = 18
 
 [node name="ErrorDialog" type="AcceptDialog" parent="."]
 visible = false

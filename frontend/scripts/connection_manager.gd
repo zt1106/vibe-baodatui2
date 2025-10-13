@@ -3,7 +3,7 @@ extends Node
 @export var websocket_url: String = "ws://127.0.0.1:7998/"
 @export var timeout_seconds: float = 3.0
 
-var _client := WebSocketPeer.new()
+var _client: WebSocketPeer = WebSocketPeer.new()
 var _connected: bool = false
 var _elapsed: float = 0.0
 var _connecting: bool = false
@@ -12,35 +12,102 @@ signal connection_succeeded
 signal connection_failed
 
 var _error_dialog: AcceptDialog = null
+var _login_container: Control = null
+var _lobby_container: Control = null
+var _nickname_input: LineEdit = null
+var _join_button: Button = null
+var _refresh_rooms_button: Button = null
+var _join_room_button: Button = null
+var _room_list: ItemList = null
+var _room_name_input: LineEdit = null
+var _player_limit: SpinBox = null
+var _create_room_button: Button = null
+var _lobby_status_label: Label = null
+var _user_info_label: Label = null
+var _room_detail_label: RichTextLabel = null
+var _mock_lobby_button: Button = null
+
+var _request_id_seq: int = 0
+var _pending_requests: Dictionary = {}
+var _rooms: Dictionary = {}
+var _current_room_detail: Dictionary = {}
+var _user_id: int = -1
+var _username: String = ""
+var _room_list_inflight: bool = false
+var _room_join_inflight: bool = false
+var _room_create_inflight: bool = false
+var _mock_mode: bool = false
+
 
 func _ready() -> void:
-	_error_dialog = get_node_or_null("ErrorDialog") as AcceptDialog
-	if _error_dialog:
-		connection_failed.connect(_on_connection_failed)
+	_cache_ui_nodes()
+	_show_login_view()
 	_attempt_connection()
 
+func _cache_ui_nodes() -> void:
+	_error_dialog = get_node_or_null("ErrorDialog") as AcceptDialog
+	_login_container = get_node_or_null("CenterContainer") as Control
+	_lobby_container = get_node_or_null("Lobby") as Control
+	_nickname_input = get_node_or_null("CenterContainer/Panel/MarginContainer/VBox/Form/NicknameInput") as LineEdit
+	_join_button = get_node_or_null("CenterContainer/Panel/MarginContainer/VBox/Form/JoinButton") as Button
+	_mock_lobby_button = get_node_or_null("CenterContainer/Panel/MarginContainer/VBox/Form/MockLobbyButton") as Button
+	_user_info_label = get_node_or_null("Lobby/MarginContainer/LobbyVBox/UserRow/UserInfoLabel") as Label
+	_refresh_rooms_button = get_node_or_null("Lobby/MarginContainer/LobbyVBox/UserRow/RefreshRoomsButton") as Button
+	_lobby_status_label = get_node_or_null("Lobby/MarginContainer/LobbyVBox/LobbyStatusLabel") as Label
+	_room_list = get_node_or_null("Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox/RoomList") as ItemList
+	_join_room_button = get_node_or_null("Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox/RoomActions/JoinRoomButton") as Button
+	_room_detail_label = get_node_or_null("Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox/RoomDetailLabel") as RichTextLabel
+	_room_name_input = get_node_or_null("Lobby/MarginContainer/LobbyVBox/CreateRoomRow/RoomNameInput") as LineEdit
+	_player_limit = get_node_or_null("Lobby/MarginContainer/LobbyVBox/CreateRoomRow/PlayerLimit") as SpinBox
+	_create_room_button = get_node_or_null("Lobby/MarginContainer/LobbyVBox/CreateRoomRow/CreateRoomButton") as Button
+
+	if _error_dialog:
+		connection_failed.connect(_on_connection_failed)
+	connection_succeeded.connect(_on_connection_succeeded)
+
+	if _join_button:
+		_join_button.disabled = true
+		_join_button.pressed.connect(_on_join_button_pressed)
+	if _mock_lobby_button:
+		_mock_lobby_button.pressed.connect(_on_mock_lobby_button_pressed)
+	if _nickname_input:
+		_nickname_input.text_submitted.connect(_on_nickname_submitted)
+
+	if _refresh_rooms_button:
+		_refresh_rooms_button.pressed.connect(_on_refresh_rooms_pressed)
+	if _room_list:
+		_room_list.item_selected.connect(_on_room_selected)
+		_room_list.item_activated.connect(_on_room_activated)
+	if _join_room_button:
+		_join_room_button.disabled = true
+		_join_room_button.pressed.connect(_on_join_room_pressed)
+	if _create_room_button:
+		_create_room_button.pressed.connect(_on_create_room_pressed)
+	if _room_detail_label:
+		_room_detail_label.bbcode_text = "Select a room to see details."
+
 func _process(delta: float) -> void:
+	if _mock_mode:
+		return
 	if _connecting:
 		_elapsed += delta
 		if _elapsed >= timeout_seconds:
 			_connecting = false
+			_connected = false
 			_client.close()
 			emit_signal("connection_failed")
-	
-	# Always poll the WebSocket to update its state
+
 	_client.poll()
-	
-	# Check connection state after polling
-	var state = _client.get_ready_state()
+
+	var state := _client.get_ready_state()
 	match state:
 		WebSocketPeer.STATE_CONNECTING:
-			# Still connecting, do nothing
 			pass
 		WebSocketPeer.STATE_OPEN:
 			if _connecting:
 				_on_handshake_completed()
+			_process_incoming_messages()
 		WebSocketPeer.STATE_CLOSING:
-			# Connection is closing
 			pass
 		WebSocketPeer.STATE_CLOSED:
 			if _connecting:
@@ -48,14 +115,29 @@ func _process(delta: float) -> void:
 			elif _connected:
 				_on_connection_closed()
 
+func _process_incoming_messages() -> void:
+	while _client.get_available_packet_count() > 0:
+		var packet: PackedByteArray = _client.get_packet()
+		if _client.get_packet_error() != OK:
+			continue
+		var message := packet.get_string_from_utf8()
+		_handle_incoming_message(message)
+
 func _attempt_connection() -> void:
+	if _mock_mode:
+		return
 	_elapsed = 0.0
 	_connecting = true
-	var err = _client.connect_to_url(websocket_url)
+	_connected = false
+	_request_id_seq = 0
+	_pending_requests.clear()
+	_rooms.clear()
+	_current_room_detail.clear()
+	_client = WebSocketPeer.new()
+	var err := _client.connect_to_url(websocket_url)
 	if err != OK:
 		_connecting = false
 		emit_signal("connection_failed")
-		return
 
 func _on_handshake_completed() -> void:
 	_connecting = false
@@ -63,14 +145,582 @@ func _on_handshake_completed() -> void:
 	emit_signal("connection_succeeded")
 
 func _on_connection_closed() -> void:
+	if _mock_mode:
+		return
 	_connected = false
-	# Connection was closed, could implement reconnection logic here
+	_pending_requests.clear()
+	_room_list_inflight = false
+	_room_join_inflight = false
+	_room_create_inflight = false
+	if _join_button:
+		_join_button.disabled = true
+	_set_lobby_status("Disconnected from server. Reconnecting...", true)
+	_show_login_view()
+	call_deferred("_attempt_connection")
 
 func _on_connection_error() -> void:
+	if _mock_mode:
+		return
 	_connecting = false
 	_connected = false
 	emit_signal("connection_failed")
 
 func _on_connection_failed() -> void:
+	if _mock_mode:
+		return
+	if _join_button:
+		_join_button.disabled = true
 	if _error_dialog:
 		_error_dialog.popup_centered()
+
+func _on_connection_succeeded() -> void:
+	if _mock_mode:
+		return
+	if _join_button:
+		_join_button.disabled = false
+	if _nickname_input:
+		_nickname_input.grab_focus()
+	_set_lobby_status("", false)
+
+func _handle_incoming_message(raw: String) -> void:
+	var json := JSON.new()
+	var parse_error := json.parse(raw)
+	if parse_error != OK:
+		push_warning("Unable to parse server message: %s" % raw)
+		return
+	var data: Variant = json.get_data()
+	if typeof(data) != TYPE_DICTIONARY:
+		return
+	if data.has("method"):
+		_handle_notification(data)
+	elif data.has("result"):
+		_handle_response(data)
+	elif data.has("error"):
+		_handle_error_response(data)
+
+func _handle_notification(envelope: Dictionary) -> void:
+	var method := str(envelope.get("method", ""))
+	var params: Variant = envelope.get("params", {})
+	match method:
+		"system":
+			_handle_system_notification(params)
+		_:
+			pass
+
+func _handle_system_notification(payload: Variant) -> void:
+	if typeof(payload) != TYPE_DICTIONARY:
+		return
+	var code := str(payload.get("code", ""))
+	var message := str(payload.get("message", ""))
+	if code == "connected":
+		return
+	_set_lobby_status(message, code != "info")
+
+func _handle_response(envelope: Dictionary) -> void:
+	if !envelope.has("id"):
+		return
+	var id: Variant = envelope.get("id")
+	if !_pending_requests.has(id):
+		return
+	var pending: Dictionary = _pending_requests[id]
+	_pending_requests.erase(id)
+	var result: Variant = envelope.get("result")
+	var on_success: Callable = pending.get("success", Callable())
+	if on_success.is_valid():
+		on_success.call(result)
+
+func _handle_error_response(envelope: Dictionary) -> void:
+	var error_info: Variant = envelope.get("error", {})
+	var id: Variant = envelope.get("id")
+	var pending: Dictionary = {}
+	if id != null and _pending_requests.has(id):
+		pending = _pending_requests[id]
+		_pending_requests.erase(id)
+	var message := "Request failed."
+	var code := -1
+	var extra: Dictionary = {}
+	if typeof(error_info) == TYPE_DICTIONARY:
+		message = str(error_info.get("message", message))
+		code = int(error_info.get("code", code))
+		extra = error_info.duplicate(true)
+	else:
+		extra = {"message": message, "code": code}
+	extra["message"] = message
+	extra["code"] = code
+	if typeof(pending) == TYPE_DICTIONARY and pending.has("method"):
+		extra["method"] = pending["method"]
+	var on_error: Callable = Callable()
+	if typeof(pending) == TYPE_DICTIONARY:
+		on_error = pending.get("failure", Callable())
+	if on_error.is_valid():
+		on_error.call(extra)
+	else:
+		_set_lobby_status(message, true)
+
+func _send_request(method: String, params: Dictionary, on_success: Callable, on_failure: Callable = Callable()) -> void:
+	if _mock_mode:
+		if on_failure.is_valid():
+			on_failure.call({
+				"code": ERR_UNAVAILABLE,
+				"message": "Offline preview mode does not contact the server.",
+				"method": method,
+			})
+		_set_lobby_status("Offline preview: server actions are disabled.", true)
+		return
+	if !_connected:
+		if on_failure.is_valid():
+			on_failure.call({"code": ERR_CONNECTION_ERROR, "message": "Not connected to the server.", "method": method})
+		_show_error("You are not connected to the server.")
+		return
+	_request_id_seq += 1
+	var request_id := _request_id_seq
+	var payload := {
+		"jsonrpc": "2.0",
+		"id": request_id,
+		"method": method,
+		"params": params.duplicate(true),
+	}
+	var encoded := JSON.stringify(payload)
+	var err := _client.send_text(encoded)
+	if err != OK:
+		if on_failure.is_valid():
+			on_failure.call({"code": err, "message": "Failed to send request.", "method": method})
+		_show_error("Unable to reach the server.")
+		return
+	_pending_requests[request_id] = {
+		"success": on_success,
+		"failure": on_failure,
+		"method": method,
+	}
+
+func _on_join_button_pressed() -> void:
+	if !_connected:
+		_show_error("Still connecting to the server. Please wait.")
+		return
+	if _nickname_input == null or _join_button == null:
+		return
+	var nickname := _nickname_input.text.strip_edges()
+	if nickname.is_empty():
+		_show_error("Please enter a display name before continuing.")
+		_nickname_input.grab_focus()
+		return
+	_join_button.disabled = true
+	_nickname_input.editable = false
+	_send_request(
+		"user_set_name",
+		{"nickname": nickname},
+		Callable(self, "_on_user_set_name_success"),
+		Callable(self, "_on_user_set_name_error")
+	)
+
+func _on_nickname_submitted(_text: String) -> void:
+	if _join_button and _join_button.disabled:
+		return
+	_on_join_button_pressed()
+
+func _on_mock_lobby_button_pressed() -> void:
+	_enter_mock_lobby()
+
+func _enter_mock_lobby() -> void:
+	_mock_mode = true
+	_connecting = false
+	_connected = false
+	_elapsed = 0.0
+	_pending_requests.clear()
+	_rooms.clear()
+	_current_room_detail.clear()
+	_request_id_seq = 0
+	_room_list_inflight = false
+	_room_join_inflight = false
+	_room_create_inflight = false
+	var state := _client.get_ready_state()
+	if state == WebSocketPeer.STATE_CONNECTING or state == WebSocketPeer.STATE_OPEN or state == WebSocketPeer.STATE_CLOSING:
+		_client.close()
+	_client = WebSocketPeer.new()
+	if _join_button:
+		_join_button.disabled = true
+	if _nickname_input:
+		_nickname_input.editable = false
+	var preview_name := ""
+	if _nickname_input:
+		preview_name = _nickname_input.text.strip_edges()
+	if preview_name.is_empty():
+		preview_name = "Guest"
+	_username = preview_name
+	_user_id = -1
+	_show_lobby_view()
+	if _user_info_label:
+		_user_info_label.text = "Logged in as: %s (offline preview)" % preview_name
+	var rooms := _build_mock_rooms()
+	_update_room_list({"rooms": rooms})
+	if _room_list and _room_list.get_item_count() > 0:
+		_room_list.select(0)
+		var metadata: Variant = _room_list.get_item_metadata(0)
+		if typeof(metadata) == TYPE_DICTIONARY:
+			_render_room_summary(metadata)
+			if metadata.has("players"):
+				_render_room_detail(metadata)
+	_set_lobby_status("Offline preview: server actions disabled.", false)
+	if _refresh_rooms_button:
+		_refresh_rooms_button.disabled = true
+	if _create_room_button:
+		_create_room_button.disabled = true
+	if _room_name_input:
+		_room_name_input.editable = false
+	if _player_limit:
+		_player_limit.editable = false
+	_join_room_button_disabled(true)
+
+func _build_mock_rooms() -> Array:
+	return [
+		{
+			"id": 101,
+			"name": "Casual Table",
+			"state": "waiting",
+			"player_count": 2,
+			"player_limit": 6,
+			"host_id": 5001,
+			"players": [
+				{"user_id": 5001, "username": "DealerDan", "state": "prepared", "is_host": true},
+				{"user_id": 5002, "username": "LuckyLuna", "state": "not_prepared", "is_host": false},
+			],
+		},
+		{
+			"id": 202,
+			"name": "High Rollers",
+			"state": "in_game",
+			"player_count": 4,
+			"player_limit": 6,
+			"host_id": 6001,
+			"players": [
+				{"user_id": 6001, "username": "AceAaron", "state": "prepared", "is_host": true},
+				{"user_id": 6002, "username": "BluffBella", "state": "prepared", "is_host": false},
+				{"user_id": 6003, "username": "ChipCharlie", "state": "prepared", "is_host": false},
+				{"user_id": 6004, "username": "RiverRiley", "state": "prepared", "is_host": false},
+			],
+		},
+		{
+			"id": 303,
+			"name": "Night Owls",
+			"state": "waiting",
+			"player_count": 3,
+			"player_limit": 5,
+			"host_id": 7001,
+			"players": [
+				{"user_id": 7001, "username": "MidnightMia", "state": "prepared", "is_host": true},
+				{"user_id": 7002, "username": "SleeplessSam", "state": "not_prepared", "is_host": false},
+				{"user_id": 7003, "username": "CoffeeKai", "state": "prepared", "is_host": false},
+			],
+		},
+	]
+
+func _on_user_set_name_success(result: Variant) -> void:
+	if _nickname_input:
+		_nickname_input.editable = true
+	if _join_button:
+		_join_button.disabled = false
+	if typeof(result) != TYPE_DICTIONARY:
+		_show_error("Unexpected response when setting display name.")
+		return
+	_user_id = int(result.get("id", -1))
+	_username = str(result.get("username", ""))
+	if _username.is_empty() and _nickname_input:
+		_username = _nickname_input.text.strip_edges()
+	if _user_info_label:
+		if _user_id >= 0:
+			_user_info_label.text = "Logged in as: %s (#%d)" % [_username, _user_id]
+		else:
+			_user_info_label.text = "Logged in as: %s" % _username
+	_show_lobby_view()
+	_request_room_list()
+
+func _on_user_set_name_error(error_data: Dictionary) -> void:
+	if _nickname_input:
+		_nickname_input.editable = true
+	if _join_button:
+		_join_button.disabled = false
+	var message := "Unable to set display name."
+	if typeof(error_data) == TYPE_DICTIONARY and error_data.has("message"):
+		message = str(error_data["message"])
+	_show_error(message)
+
+func _on_refresh_rooms_pressed() -> void:
+	if _mock_mode:
+		_enter_mock_lobby()
+		return
+	_request_room_list()
+
+func _request_room_list() -> void:
+	if _mock_mode:
+		_enter_mock_lobby()
+		return
+	if _room_list_inflight:
+		return
+	_room_list_inflight = true
+	if _refresh_rooms_button:
+		_refresh_rooms_button.disabled = true
+	_set_lobby_status("Loading rooms...", false)
+	_send_request(
+		"room_list",
+		{},
+		Callable(self, "_on_room_list_success"),
+		Callable(self, "_on_room_list_error")
+	)
+
+func _on_room_list_success(result: Variant) -> void:
+	_room_list_inflight = false
+	if _refresh_rooms_button:
+		_refresh_rooms_button.disabled = false
+	_update_room_list(result)
+
+func _on_room_list_error(error_data: Dictionary) -> void:
+	_room_list_inflight = false
+	if _refresh_rooms_button:
+		_refresh_rooms_button.disabled = false
+	var message := "Unable to load rooms."
+	if typeof(error_data) == TYPE_DICTIONARY and error_data.has("message"):
+		message = str(error_data["message"])
+	_set_lobby_status(message, true)
+
+func _update_room_list(payload: Variant) -> void:
+	if _room_list:
+		_room_list.clear()
+	_join_room_button_disabled(true)
+	_rooms.clear()
+	if _room_detail_label:
+		_room_detail_label.bbcode_text = "Select a room to see details."
+	if typeof(payload) != TYPE_DICTIONARY:
+		_set_lobby_status("Unexpected room list payload.", true)
+		return
+	var rooms: Array = payload.get("rooms", [])
+	if typeof(rooms) != TYPE_ARRAY:
+		_set_lobby_status("Unexpected room list payload.", true)
+		return
+	if rooms.is_empty():
+		_set_lobby_status("No rooms yet. Create one to get started.", false)
+		return
+	for room_entry in rooms:
+		if typeof(room_entry) != TYPE_DICTIONARY:
+			continue
+		var room_id_variant: Variant = room_entry.get("id", null)
+		if room_id_variant == null:
+			continue
+		var room_id := int(room_id_variant)
+		var room_name := str(room_entry.get("name", "Room %d" % room_id))
+		var player_count := int(room_entry.get("player_count", 0))
+		var player_limit := int(room_entry.get("player_limit", 0))
+		var state_text := _format_room_state(str(room_entry.get("state", "")))
+		var label := "%s • %d/%d • %s" % [room_name, player_count, player_limit, state_text]
+		if _room_list:
+			var index := _room_list.add_item(label)
+			_room_list.set_item_metadata(index, room_entry.duplicate(true))
+		_rooms[room_id] = room_entry.duplicate(true)
+	_set_lobby_status("Found %d room(s)." % rooms.size(), false)
+
+func _on_room_selected(index: int) -> void:
+	if _room_list == null:
+		return
+	var metadata: Variant = _room_list.get_item_metadata(index)
+	if _mock_mode:
+		_join_room_button_disabled(true)
+	else:
+		_join_room_button_disabled(false)
+	if typeof(metadata) == TYPE_DICTIONARY:
+		_render_room_summary(metadata)
+		if metadata.has("players"):
+			_render_room_detail(metadata)
+
+func _on_room_activated(index: int) -> void:
+	_on_room_selected(index)
+	_on_join_room_pressed()
+
+func _on_join_room_pressed() -> void:
+	if _mock_mode:
+		_set_lobby_status("Offline preview: joining rooms is disabled.", true)
+		return
+	if _room_join_inflight:
+		return
+	if _room_list == null or !_room_list.is_anything_selected():
+		_set_lobby_status("Select a room to join.", true)
+		return
+	var selected := _room_list.get_selected_items()
+	if selected.is_empty():
+		_set_lobby_status("Select a room to join.", true)
+		return
+	var index := selected[0]
+	var metadata: Variant = _room_list.get_item_metadata(index)
+	if typeof(metadata) != TYPE_DICTIONARY or !metadata.has("id"):
+		_set_lobby_status("Unable to determine the selected room.", true)
+		return
+	var room_id := int(metadata["id"])
+	_room_join_inflight = true
+	_join_room_button_disabled(true)
+	_set_lobby_status("Joining room...", false)
+	_send_request(
+		"room_join",
+		{"room_id": room_id},
+		Callable(self, "_on_room_join_success"),
+		Callable(self, "_on_room_join_error")
+	)
+
+func _on_room_join_success(result: Variant) -> void:
+	_room_join_inflight = false
+	_join_room_button_disabled(false)
+	if typeof(result) != TYPE_DICTIONARY:
+		_set_lobby_status("Joined room.", false)
+		return
+	_current_room_detail = result.duplicate(true)
+	var room_name := str(result.get("name", "room"))
+	_set_lobby_status("Joined room \"%s\"." % room_name, false)
+	_render_room_detail(result)
+
+func _on_room_join_error(error_data: Dictionary) -> void:
+	_room_join_inflight = false
+	_join_room_button_disabled(false)
+	var message := "Unable to join room."
+	if typeof(error_data) == TYPE_DICTIONARY and error_data.has("message"):
+		message = str(error_data["message"])
+	_set_lobby_status(message, true)
+
+func _on_create_room_pressed() -> void:
+	if _mock_mode:
+		_set_lobby_status("Offline preview: creating rooms is disabled.", true)
+		return
+	if _room_create_inflight:
+		return
+	if _room_name_input == null:
+		return
+	var room_name := _room_name_input.text.strip_edges()
+	if room_name.is_empty():
+		_set_lobby_status("Enter a room name to host.", true)
+		_room_name_input.grab_focus()
+		return
+	var limit := 4
+	if _player_limit:
+		limit = int(_player_limit.value)
+	_room_create_inflight = true
+	if _create_room_button:
+		_create_room_button.disabled = true
+	_set_lobby_status("Creating room...", false)
+	_send_request(
+		"room_create",
+		{"name": room_name, "player_limit": limit},
+		Callable(self, "_on_room_create_success"),
+		Callable(self, "_on_room_create_error")
+	)
+
+func _on_room_create_success(result: Variant) -> void:
+	_room_create_inflight = false
+	if _create_room_button:
+		_create_room_button.disabled = false
+	if _room_name_input:
+		_room_name_input.text = ""
+	if typeof(result) != TYPE_DICTIONARY:
+		_set_lobby_status("Room created.", false)
+		return
+	_current_room_detail = result.duplicate(true)
+	var room_name := str(result.get("name", "room"))
+	_set_lobby_status("Created and hosting \"%s\"." % room_name, false)
+	_render_room_detail(result)
+	_request_room_list()
+
+func _on_room_create_error(error_data: Dictionary) -> void:
+	_room_create_inflight = false
+	if _create_room_button:
+		_create_room_button.disabled = false
+	var message := "Unable to create room."
+	if typeof(error_data) == TYPE_DICTIONARY and error_data.has("message"):
+		message = str(error_data["message"])
+	_set_lobby_status(message, true)
+
+func _render_room_summary(summary: Variant) -> void:
+	if _room_detail_label == null:
+		return
+	if typeof(summary) != TYPE_DICTIONARY:
+		_room_detail_label.bbcode_text = "Select a room to see details."
+		return
+	var room_name := _escape_bbcode(str(summary.get("name", "Room")))
+	var state := _format_room_state(str(summary.get("state", "")))
+	var player_count := int(summary.get("player_count", 0))
+	var player_limit := int(summary.get("player_limit", 0))
+	var lines: Array[String] = []
+	lines.append("[b]%s[/b]" % room_name)
+	lines.append("State: %s" % state)
+	lines.append("Players: %d/%d" % [player_count, player_limit])
+	_room_detail_label.bbcode_text = "\n".join(lines)
+
+func _render_room_detail(detail: Variant) -> void:
+	if _room_detail_label == null or typeof(detail) != TYPE_DICTIONARY:
+		return
+	var room_name := _escape_bbcode(str(detail.get("name", "Room")))
+	var state := _format_room_state(str(detail.get("state", "")))
+	var players: Array = detail.get("players", [])
+	var player_limit := int(detail.get("player_limit", players.size()))
+	var lines: Array[String] = []
+	lines.append("[b]%s[/b]" % room_name)
+	lines.append("State: %s" % state)
+	lines.append("Players: %d/%d" % [players.size(), player_limit])
+	for player_data in players:
+		if typeof(player_data) != TYPE_DICTIONARY:
+			continue
+		var player_name := _escape_bbcode(str(player_data.get("username", "Unknown")))
+		var role := "[b](Host)[/b] " if player_data.get("is_host", false) else ""
+		var ready_state := _format_player_state(str(player_data.get("state", "")))
+		lines.append("%s%s [%s]" % [role, player_name, ready_state])
+	_room_detail_label.bbcode_text = "\n".join(lines)
+
+func _format_room_state(state: String) -> String:
+	match state:
+		"waiting":
+			return "Waiting for players"
+		"in_game":
+			return "In progress"
+		_:
+			return state.capitalize()
+
+func _format_player_state(state: String) -> String:
+	match state:
+		"prepared":
+			return "Ready"
+		"not_prepared":
+			return "Not ready"
+		_:
+			return state.capitalize()
+
+func _escape_bbcode(text: String) -> String:
+	return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+
+func _set_lobby_status(message: String, is_error: bool) -> void:
+	if _lobby_status_label == null:
+		return
+	var color := Color(0.95, 0.54, 0.54) if is_error else Color(1, 1, 1)
+	_lobby_status_label.modulate = color
+	_lobby_status_label.text = message
+
+func _show_login_view() -> void:
+	if _login_container:
+		_login_container.visible = true
+	if _lobby_container:
+		_lobby_container.visible = false
+	if _nickname_input:
+		_nickname_input.editable = true
+		_nickname_input.select_all()
+		_nickname_input.grab_focus()
+
+func _show_lobby_view() -> void:
+	if _login_container:
+		_login_container.visible = false
+	if _lobby_container:
+		_lobby_container.visible = true
+	_render_room_summary(null)
+
+func _show_error(message: String) -> void:
+	if _error_dialog:
+		_error_dialog.dialog_text = message
+		_error_dialog.popup_centered()
+	else:
+		push_warning(message)
+
+func _join_room_button_disabled(disabled: bool) -> void:
+	if _join_room_button:
+		_join_room_button.disabled = disabled
