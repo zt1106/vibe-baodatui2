@@ -84,7 +84,7 @@ func _cache_ui_nodes() -> void:
 	if _create_room_button:
 		_create_room_button.pressed.connect(_on_create_room_pressed)
 	if _room_detail_label:
-		_room_detail_label.bbcode_text = "Select a room to see details."
+		_room_detail_label.bbcode_text = "选择一个房间查看详情。"
 
 func _process(delta: float) -> void:
 	if _mock_mode:
@@ -154,7 +154,7 @@ func _on_connection_closed() -> void:
 	_room_create_inflight = false
 	if _join_button:
 		_join_button.disabled = true
-	_set_lobby_status("Disconnected from server. Reconnecting...", true)
+	_set_lobby_status("已与服务器断开连接，正在重新连接...", true)
 	_show_login_view()
 	call_deferred("_attempt_connection")
 
@@ -186,7 +186,7 @@ func _handle_incoming_message(raw: String) -> void:
 	var json := JSON.new()
 	var parse_error := json.parse(raw)
 	if parse_error != OK:
-		push_warning("Unable to parse server message: %s" % raw)
+		push_warning("无法解析服务器消息：%s" % raw)
 		return
 	var data: Variant = json.get_data()
 	if typeof(data) != TYPE_DICTIONARY:
@@ -236,7 +236,7 @@ func _handle_error_response(envelope: Dictionary) -> void:
 	if id != null and _pending_requests.has(id):
 		pending = _pending_requests[id]
 		_pending_requests.erase(id)
-	var message := "Request failed."
+	var message := "请求失败。"
 	var code := -1
 	var extra: Dictionary = {}
 	if typeof(error_info) == TYPE_DICTIONARY:
@@ -262,15 +262,15 @@ func _send_request(method: String, params: Dictionary, on_success: Callable, on_
 		if on_failure.is_valid():
 			on_failure.call({
 				"code": ERR_UNAVAILABLE,
-				"message": "Offline preview mode does not contact the server.",
+				"message": "离线预览模式不会连接服务器。",
 				"method": method,
 			})
-		_set_lobby_status("Offline preview: server actions are disabled.", true)
+		_set_lobby_status("离线预览：服务器操作已禁用。", true)
 		return
 	if !_connected:
 		if on_failure.is_valid():
-			on_failure.call({"code": ERR_CONNECTION_ERROR, "message": "Not connected to the server.", "method": method})
-		_show_error("You are not connected to the server.")
+			on_failure.call({"code": ERR_CONNECTION_ERROR, "message": "尚未连接到服务器。", "method": method})
+		_show_error("你尚未连接到服务器。")
 		return
 	_request_id_seq += 1
 	var request_id := _request_id_seq
@@ -284,8 +284,8 @@ func _send_request(method: String, params: Dictionary, on_success: Callable, on_
 	var err := _client.send_text(encoded)
 	if err != OK:
 		if on_failure.is_valid():
-			on_failure.call({"code": err, "message": "Failed to send request.", "method": method})
-		_show_error("Unable to reach the server.")
+			on_failure.call({"code": err, "message": "请求发送失败。", "method": method})
+		_show_error("无法连接到服务器。")
 		return
 	_pending_requests[request_id] = {
 		"success": on_success,
@@ -295,13 +295,13 @@ func _send_request(method: String, params: Dictionary, on_success: Callable, on_
 
 func _on_join_button_pressed() -> void:
 	if !_connected:
-		_show_error("Still connecting to the server. Please wait.")
+		_show_error("仍在连接服务器，请稍候。")
 		return
 	if _nickname_input == null or _join_button == null:
 		return
 	var nickname := _nickname_input.text.strip_edges()
 	if nickname.is_empty():
-		_show_error("Please enter a display name before continuing.")
+		_show_error("请先输入显示名称，再继续。")
 		_nickname_input.grab_focus()
 		return
 	_join_button.disabled = true
@@ -345,12 +345,12 @@ func _enter_mock_lobby() -> void:
 	if _nickname_input:
 		preview_name = _nickname_input.text.strip_edges()
 	if preview_name.is_empty():
-		preview_name = "Guest"
+		preview_name = "游客"
 	_username = preview_name
 	_user_id = -1
 	_show_lobby_view()
 	if _user_info_label:
-		_user_info_label.text = "Logged in as: %s (offline preview)" % preview_name
+		_user_info_label.text = "当前登录：%s（离线预览）" % preview_name
 	var rooms := _build_mock_rooms()
 	_update_room_list({"rooms": rooms})
 	if _room_list and _room_list.get_item_count() > 0:
@@ -360,7 +360,7 @@ func _enter_mock_lobby() -> void:
 			_render_room_summary(metadata)
 			if metadata.has("players"):
 				_render_room_detail(metadata)
-	_set_lobby_status("Offline preview: server actions disabled.", false)
+	_set_lobby_status("离线预览：服务器操作已禁用。", false)
 	if _refresh_rooms_button:
 		_refresh_rooms_button.disabled = true
 	if _create_room_button:
@@ -375,7 +375,7 @@ func _build_mock_rooms() -> Array:
 	return [
 		{
 			"id": 101,
-			"name": "Casual Table",
+			"name": "休闲牌桌",
 			"state": "waiting",
 			"player_count": 2,
 			"player_limit": 6,
@@ -387,7 +387,7 @@ func _build_mock_rooms() -> Array:
 		},
 		{
 			"id": 202,
-			"name": "High Rollers",
+			"name": "高额牌桌",
 			"state": "in_game",
 			"player_count": 4,
 			"player_limit": 6,
@@ -401,7 +401,7 @@ func _build_mock_rooms() -> Array:
 		},
 		{
 			"id": 303,
-			"name": "Night Owls",
+			"name": "夜猫子牌桌",
 			"state": "waiting",
 			"player_count": 3,
 			"player_limit": 5,
@@ -420,7 +420,7 @@ func _on_user_set_name_success(result: Variant) -> void:
 	if _join_button:
 		_join_button.disabled = false
 	if typeof(result) != TYPE_DICTIONARY:
-		_show_error("Unexpected response when setting display name.")
+		_show_error("设置显示名称时收到异常响应。")
 		return
 	_user_id = int(result.get("id", -1))
 	_username = str(result.get("username", ""))
@@ -428,9 +428,9 @@ func _on_user_set_name_success(result: Variant) -> void:
 		_username = _nickname_input.text.strip_edges()
 	if _user_info_label:
 		if _user_id >= 0:
-			_user_info_label.text = "Logged in as: %s (#%d)" % [_username, _user_id]
+			_user_info_label.text = "当前登录：%s（#%d）" % [_username, _user_id]
 		else:
-			_user_info_label.text = "Logged in as: %s" % _username
+			_user_info_label.text = "当前登录：%s" % _username
 	_show_lobby_view()
 	_request_room_list()
 
@@ -439,7 +439,7 @@ func _on_user_set_name_error(error_data: Dictionary) -> void:
 		_nickname_input.editable = true
 	if _join_button:
 		_join_button.disabled = false
-	var message := "Unable to set display name."
+	var message := "无法设置显示名称。"
 	if typeof(error_data) == TYPE_DICTIONARY and error_data.has("message"):
 		message = str(error_data["message"])
 	_show_error(message)
@@ -459,7 +459,7 @@ func _request_room_list() -> void:
 	_room_list_inflight = true
 	if _refresh_rooms_button:
 		_refresh_rooms_button.disabled = true
-	_set_lobby_status("Loading rooms...", false)
+	_set_lobby_status("正在加载房间...", false)
 	_send_request(
 		"room_list",
 		{},
@@ -477,7 +477,7 @@ func _on_room_list_error(error_data: Dictionary) -> void:
 	_room_list_inflight = false
 	if _refresh_rooms_button:
 		_refresh_rooms_button.disabled = false
-	var message := "Unable to load rooms."
+	var message := "无法加载房间。"
 	if typeof(error_data) == TYPE_DICTIONARY and error_data.has("message"):
 		message = str(error_data["message"])
 	_set_lobby_status(message, true)
@@ -488,16 +488,16 @@ func _update_room_list(payload: Variant) -> void:
 	_join_room_button_disabled(true)
 	_rooms.clear()
 	if _room_detail_label:
-		_room_detail_label.bbcode_text = "Select a room to see details."
+		_room_detail_label.bbcode_text = "选择一个房间查看详情。"
 	if typeof(payload) != TYPE_DICTIONARY:
-		_set_lobby_status("Unexpected room list payload.", true)
+		_set_lobby_status("房间列表数据异常。", true)
 		return
 	var rooms: Array = payload.get("rooms", [])
 	if typeof(rooms) != TYPE_ARRAY:
-		_set_lobby_status("Unexpected room list payload.", true)
+		_set_lobby_status("房间列表数据异常。", true)
 		return
 	if rooms.is_empty():
-		_set_lobby_status("No rooms yet. Create one to get started.", false)
+		_set_lobby_status("暂无房间，创建一个开始吧。", false)
 		return
 	for room_entry in rooms:
 		if typeof(room_entry) != TYPE_DICTIONARY:
@@ -506,7 +506,7 @@ func _update_room_list(payload: Variant) -> void:
 		if room_id_variant == null:
 			continue
 		var room_id := int(room_id_variant)
-		var room_name := str(room_entry.get("name", "Room %d" % room_id))
+		var room_name := str(room_entry.get("name", "房间 %d" % room_id))
 		var player_count := int(room_entry.get("player_count", 0))
 		var player_limit := int(room_entry.get("player_limit", 0))
 		var state_text := _format_room_state(str(room_entry.get("state", "")))
@@ -515,7 +515,7 @@ func _update_room_list(payload: Variant) -> void:
 			var index := _room_list.add_item(label)
 			_room_list.set_item_metadata(index, room_entry.duplicate(true))
 		_rooms[room_id] = room_entry.duplicate(true)
-	_set_lobby_status("Found %d room(s)." % rooms.size(), false)
+	_set_lobby_status("找到 %d 个房间。" % rooms.size(), false)
 
 func _on_room_selected(index: int) -> void:
 	if _room_list == null:
@@ -536,26 +536,26 @@ func _on_room_activated(index: int) -> void:
 
 func _on_join_room_pressed() -> void:
 	if _mock_mode:
-		_set_lobby_status("Offline preview: joining rooms is disabled.", true)
+		_set_lobby_status("离线预览：无法加入房间。", true)
 		return
 	if _room_join_inflight:
 		return
 	if _room_list == null or !_room_list.is_anything_selected():
-		_set_lobby_status("Select a room to join.", true)
+		_set_lobby_status("请选择要加入的房间。", true)
 		return
 	var selected := _room_list.get_selected_items()
 	if selected.is_empty():
-		_set_lobby_status("Select a room to join.", true)
+		_set_lobby_status("请选择要加入的房间。", true)
 		return
 	var index := selected[0]
 	var metadata: Variant = _room_list.get_item_metadata(index)
 	if typeof(metadata) != TYPE_DICTIONARY or !metadata.has("id"):
-		_set_lobby_status("Unable to determine the selected room.", true)
+		_set_lobby_status("无法确定所选房间。", true)
 		return
 	var room_id := int(metadata["id"])
 	_room_join_inflight = true
 	_join_room_button_disabled(true)
-	_set_lobby_status("Joining room...", false)
+	_set_lobby_status("正在加入房间...", false)
 	_send_request(
 		"room_join",
 		{"room_id": room_id},
@@ -567,24 +567,24 @@ func _on_room_join_success(result: Variant) -> void:
 	_room_join_inflight = false
 	_join_room_button_disabled(false)
 	if typeof(result) != TYPE_DICTIONARY:
-		_set_lobby_status("Joined room.", false)
+		_set_lobby_status("已加入房间。", false)
 		return
 	_current_room_detail = result.duplicate(true)
-	var room_name := str(result.get("name", "room"))
-	_set_lobby_status("Joined room \"%s\"." % room_name, false)
+	var room_name := str(result.get("name", "房间"))
+	_set_lobby_status("已加入房间“%s”。" % room_name, false)
 	_render_room_detail(result)
 
 func _on_room_join_error(error_data: Dictionary) -> void:
 	_room_join_inflight = false
 	_join_room_button_disabled(false)
-	var message := "Unable to join room."
+	var message := "无法加入房间。"
 	if typeof(error_data) == TYPE_DICTIONARY and error_data.has("message"):
 		message = str(error_data["message"])
 	_set_lobby_status(message, true)
 
 func _on_create_room_pressed() -> void:
 	if _mock_mode:
-		_set_lobby_status("Offline preview: creating rooms is disabled.", true)
+		_set_lobby_status("离线预览：无法创建房间。", true)
 		return
 	if _room_create_inflight:
 		return
@@ -592,7 +592,7 @@ func _on_create_room_pressed() -> void:
 		return
 	var room_name := _room_name_input.text.strip_edges()
 	if room_name.is_empty():
-		_set_lobby_status("Enter a room name to host.", true)
+		_set_lobby_status("请输入房间名称以创建。", true)
 		_room_name_input.grab_focus()
 		return
 	var limit := 4
@@ -601,7 +601,7 @@ func _on_create_room_pressed() -> void:
 	_room_create_inflight = true
 	if _create_room_button:
 		_create_room_button.disabled = true
-	_set_lobby_status("Creating room...", false)
+	_set_lobby_status("正在创建房间...", false)
 	_send_request(
 		"room_create",
 		{"name": room_name, "player_limit": limit},
@@ -616,11 +616,11 @@ func _on_room_create_success(result: Variant) -> void:
 	if _room_name_input:
 		_room_name_input.text = ""
 	if typeof(result) != TYPE_DICTIONARY:
-		_set_lobby_status("Room created.", false)
+		_set_lobby_status("房间已创建。", false)
 		return
 	_current_room_detail = result.duplicate(true)
-	var room_name := str(result.get("name", "room"))
-	_set_lobby_status("Created and hosting \"%s\"." % room_name, false)
+	var room_name := str(result.get("name", "房间"))
+	_set_lobby_status("已创建并成为“%s”的房主。" % room_name, false)
 	_render_room_detail(result)
 	_request_room_list()
 
@@ -628,7 +628,7 @@ func _on_room_create_error(error_data: Dictionary) -> void:
 	_room_create_inflight = false
 	if _create_room_button:
 		_create_room_button.disabled = false
-	var message := "Unable to create room."
+	var message := "无法创建房间。"
 	if typeof(error_data) == TYPE_DICTIONARY and error_data.has("message"):
 		message = str(error_data["message"])
 	_set_lobby_status(message, true)
@@ -637,34 +637,34 @@ func _render_room_summary(summary: Variant) -> void:
 	if _room_detail_label == null:
 		return
 	if typeof(summary) != TYPE_DICTIONARY:
-		_room_detail_label.bbcode_text = "Select a room to see details."
+		_room_detail_label.bbcode_text = "选择一个房间查看详情。"
 		return
-	var room_name := _escape_bbcode(str(summary.get("name", "Room")))
+	var room_name := _escape_bbcode(str(summary.get("name", "房间")))
 	var state := _format_room_state(str(summary.get("state", "")))
 	var player_count := int(summary.get("player_count", 0))
 	var player_limit := int(summary.get("player_limit", 0))
 	var lines: Array[String] = []
 	lines.append("[b]%s[/b]" % room_name)
-	lines.append("State: %s" % state)
-	lines.append("Players: %d/%d" % [player_count, player_limit])
+	lines.append("状态：%s" % state)
+	lines.append("玩家：%d/%d" % [player_count, player_limit])
 	_room_detail_label.bbcode_text = "\n".join(lines)
 
 func _render_room_detail(detail: Variant) -> void:
 	if _room_detail_label == null or typeof(detail) != TYPE_DICTIONARY:
 		return
-	var room_name := _escape_bbcode(str(detail.get("name", "Room")))
+	var room_name := _escape_bbcode(str(detail.get("name", "房间")))
 	var state := _format_room_state(str(detail.get("state", "")))
 	var players: Array = detail.get("players", [])
 	var player_limit := int(detail.get("player_limit", players.size()))
 	var lines: Array[String] = []
 	lines.append("[b]%s[/b]" % room_name)
-	lines.append("State: %s" % state)
-	lines.append("Players: %d/%d" % [players.size(), player_limit])
+	lines.append("状态：%s" % state)
+	lines.append("玩家：%d/%d" % [players.size(), player_limit])
 	for player_data in players:
 		if typeof(player_data) != TYPE_DICTIONARY:
 			continue
-		var player_name := _escape_bbcode(str(player_data.get("username", "Unknown")))
-		var role := "[b](Host)[/b] " if player_data.get("is_host", false) else ""
+		var player_name := _escape_bbcode(str(player_data.get("username", "未知")))
+		var role := "[b](房主)[/b] " if player_data.get("is_host", false) else ""
 		var ready_state := _format_player_state(str(player_data.get("state", "")))
 		lines.append("%s%s [%s]" % [role, player_name, ready_state])
 	_room_detail_label.bbcode_text = "\n".join(lines)
@@ -672,18 +672,18 @@ func _render_room_detail(detail: Variant) -> void:
 func _format_room_state(state: String) -> String:
 	match state:
 		"waiting":
-			return "Waiting for players"
+			return "等待玩家"
 		"in_game":
-			return "In progress"
+			return "进行中"
 		_:
 			return state.capitalize()
 
 func _format_player_state(state: String) -> String:
 	match state:
 		"prepared":
-			return "Ready"
+			return "已准备"
 		"not_prepared":
-			return "Not ready"
+			return "未准备"
 		_:
 			return state.capitalize()
 

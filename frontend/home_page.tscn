@@ -73,13 +73,13 @@ theme_override_constants/separation = 24
 
 [node name="Title" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox"]
 layout_mode = 2
-text = "Welcome to Vibe"
+text = "欢迎来到 Vibe"
 horizontal_alignment = 1
 theme_override_font_sizes/font_size = 42
 
 [node name="Subtitle" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox"]
 layout_mode = 2
-text = "Pick a nickname to appear in the lobby and at the table."
+text = "请输入将在大厅和牌桌中显示的昵称。"
 horizontal_alignment = 1
 autowrap_mode = 2
 theme_override_font_sizes/font_size = 20
@@ -91,30 +91,30 @@ theme_override_constants/separation = 18
 
 [node name="NameLabel" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox/Form"]
 layout_mode = 2
-text = "Display Name"
+text = "显示名称"
 theme_override_font_sizes/font_size = 18
 
 [node name="NicknameInput" type="LineEdit" parent="CenterContainer/Panel/MarginContainer/VBox/Form"]
 layout_mode = 2
-placeholder_text = "Choose a name visible to other players"
+placeholder_text = "为自己选一个让其他玩家看到的名字"
 min_size = Vector2(0, 48)
 theme_override_font_sizes/font_size = 18
 
 [node name="JoinButton" type="Button" parent="CenterContainer/Panel/MarginContainer/VBox/Form"]
 layout_mode = 2
-text = "Join as Guest"
+text = "以游客身份加入"
 theme_override_font_sizes/font_size = 22
 min_size = Vector2(0, 52)
 
 [node name="MockLobbyButton" type="Button" parent="CenterContainer/Panel/MarginContainer/VBox/Form"]
 layout_mode = 2
-text = "Preview Lobby (Offline)"
+text = "预览大厅（离线）"
 theme_override_font_sizes/font_size = 18
 min_size = Vector2(0, 48)
 
 [node name="Hint" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox/Form"]
 layout_mode = 2
-text = "No passwords or accounts required — just pick a nickname and jump in."
+text = "无需密码或账号——只需输入昵称即可开始。"
 autowrap_mode = 2
 theme_override_font_sizes/font_size = 16
 
@@ -159,13 +159,13 @@ theme_override_constants/separation = 24
 
 [node name="LobbyTitle" type="Label" parent="Lobby/MarginContainer/LobbyVBox"]
 layout_mode = 2
-text = "Game Lobby"
+text = "游戏大厅"
 horizontal_alignment = 1
 theme_override_font_sizes/font_size = 36
 
 [node name="Subtitle" type="Label" parent="Lobby/MarginContainer/LobbyVBox"]
 layout_mode = 2
-text = "Browse rooms, join other players, or host your own table."
+text = "浏览房间、加入其他玩家，或创建自己的牌桌。"
 horizontal_alignment = 1
 autowrap_mode = 2
 theme_override_font_sizes/font_size = 18
@@ -177,12 +177,12 @@ theme_override_constants/separation = 16
 [node name="UserInfoLabel" type="Label" parent="Lobby/MarginContainer/LobbyVBox/UserRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Logged in as: -"
+text = "当前登录：-"
 theme_override_font_sizes/font_size = 18
 
 [node name="RefreshRoomsButton" type="Button" parent="Lobby/MarginContainer/LobbyVBox/UserRow"]
 layout_mode = 2
-text = "Refresh Rooms"
+text = "刷新房间"
 theme_override_font_sizes/font_size = 18
 
 [node name="LobbyStatusLabel" type="Label" parent="Lobby/MarginContainer/LobbyVBox"]
@@ -212,7 +212,7 @@ theme_override_constants/separation = 16
 
 [node name="RoomListLabel" type="Label" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox"]
 layout_mode = 2
-text = "Available Rooms"
+text = "可用房间"
 theme_override_font_sizes/font_size = 20
 
 [node name="RoomList" type="ItemList" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox"]
@@ -227,7 +227,7 @@ theme_override_constants/separation = 16
 
 [node name="JoinRoomButton" type="Button" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox/RoomActions"]
 layout_mode = 2
-text = "Join Selected Room"
+text = "加入所选房间"
 theme_override_font_sizes/font_size = 18
 disabled = true
 
@@ -245,7 +245,7 @@ theme_override_constants/separation = 16
 [node name="RoomNameInput" type="LineEdit" parent="Lobby/MarginContainer/LobbyVBox/CreateRoomRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-placeholder_text = "Room name"
+placeholder_text = "房间名称"
 theme_override_font_sizes/font_size = 18
 
 [node name="PlayerLimit" type="SpinBox" parent="Lobby/MarginContainer/LobbyVBox/CreateRoomRow"]
@@ -259,11 +259,11 @@ theme_override_font_sizes/font_size = 18
 
 [node name="CreateRoomButton" type="Button" parent="Lobby/MarginContainer/LobbyVBox/CreateRoomRow"]
 layout_mode = 2
-text = "Create & Host Room"
+text = "创建并成为房主"
 theme_override_font_sizes/font_size = 18
 
 [node name="ErrorDialog" type="AcceptDialog" parent="."]
 visible = false
-dialog_text = "Unable to connect to the game server.\nPlease ensure the backend is running on ws://127.0.0.1:7998."
-title = "Connection Error"
+dialog_text = "无法连接到游戏服务器。\n请确认后端正在 ws://127.0.0.1:7998 运行。"
+title = "连接错误"
 position = Vector2(480, 260)
