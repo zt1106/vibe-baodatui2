@@ -1,0 +1,15 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Debug Backend Server",
+			"type": "lldb",
+			"request": "launch",
+			"program": "${workspaceFolder}/backend/zig-out/bin/backend",
+			"args": [],
+			"cwd": "${workspaceFolder}/backend",
+			"env": {},
+			"stopOnEntry": false
+		}
+	]
+}
