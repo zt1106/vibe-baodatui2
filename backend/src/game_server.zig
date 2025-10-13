@@ -106,8 +106,9 @@ const Handler = struct {
 
     pub fn clientMessage(self: *Handler, data: []const u8) !void {
         var frame = messages.parseFrame(self.allocator, data) catch |err| {
-            log.warn("invalid message from client: {}", .{err});
-            const error_frame = try messages.encodeError(self.allocator, null, -32700, "Parse error");
+            const mapped = messages.mapParseFrameError(err);
+            log.warn("invalid message from client: {} -> {d} {s}", .{ err, mapped.code, mapped.message });
+            const error_frame = try messages.encodeError(self.allocator, null, mapped.code, mapped.message);
             defer self.allocator.free(error_frame);
             try self.conn.write(error_frame);
             return;
@@ -120,7 +121,7 @@ const Handler = struct {
                 self.app.onCall(self.conn, &self.state, call) catch |err| {
                     log.err("handler error: {}", .{err});
                     if (call.idValue()) |id| {
-                        const error_frame = try messages.encodeError(self.allocator, id, -32000, @errorName(err));
+                        const error_frame = try messages.encodeError(self.allocator, id, messages.RpcErrorCodes.ServerError, @errorName(err));
                         defer self.allocator.free(error_frame);
                         self.conn.write(error_frame) catch {};
                     }

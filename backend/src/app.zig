@@ -157,7 +157,7 @@ pub const GameApp = struct {
             func(self, conn, state, call) catch |err| {
                 log.err("handler error: {}", .{err});
                 if (call.idValue()) |id| {
-                    try self.sendError(conn, id, -32000, @errorName(err));
+                    try self.sendError(conn, id, messages.RpcErrorCodes.ServerError, @errorName(err));
                 }
             };
             return;
@@ -165,7 +165,7 @@ pub const GameApp = struct {
 
         log.warn("unknown method: {s}", .{method_name});
         if (call.idValue()) |id| {
-            try self.sendError(conn, id, -32601, "Method not found");
+            try self.sendError(conn, id, messages.RpcErrorCodes.MethodNotFound, "Method not found");
         }
     }
 
@@ -236,7 +236,7 @@ pub const GameApp = struct {
             ) anyerror!void {
                 const payload = rpc_call.paramsAs(Payload) catch |err| {
                     if (rpc_call.idValue()) |id| {
-                        try app.sendError(conn, id, -32602, "Invalid params");
+                        try app.sendError(conn, id, messages.RpcErrorCodes.InvalidParams, "Invalid params");
                     } else {
                         log.warn("invalid params for notification method {s}: {}", .{ rpc_call.methodName(), err });
                     }
@@ -266,7 +266,7 @@ pub const GameApp = struct {
             ) anyerror!void {
                 const payload = rpc_call.paramsAs(RequestPayload) catch |err| {
                     if (rpc_call.idValue()) |id| {
-                        try app.sendError(conn, id, -32602, "Invalid params");
+                        try app.sendError(conn, id, messages.RpcErrorCodes.InvalidParams, "Invalid params");
                     } else {
                         log.warn("invalid params for notification method {s}: {}", .{ rpc_call.methodName(), err });
                     }
@@ -407,7 +407,7 @@ fn handleRoomList(
 ) anyerror!void {
     _ = call.paramsAs(messages.RoomListRequestPayload) catch |err| {
         if (call.idValue()) |id| {
-            try self.sendError(conn, id, -32602, "Invalid params");
+            try self.sendError(conn, id, messages.RpcErrorCodes.InvalidParams, "Invalid params");
         } else {
             log.warn("invalid params for notification method {s}: {}", .{ call.methodName(), err });
         }

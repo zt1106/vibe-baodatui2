@@ -9,6 +9,22 @@ pub const JsonRpcVersion = "2.0";
 
 pub const FrameError = error{InvalidFrameKind};
 
+pub const RpcErrorCodes = struct {
+    pub const ParseError: i64 = -32700;
+    pub const InvalidRequest: i64 = -32600;
+    pub const MethodNotFound: i64 = -32601;
+    pub const InvalidParams: i64 = -32602;
+    pub const InternalError: i64 = -32603;
+    pub const ServerError: i64 = -32000; // implementation-defined range -32000..-32099
+};
+
+pub fn mapParseFrameError(err: anyerror) struct { code: i64, message: []const u8 } {
+    return switch (err) {
+        error.InvalidEnvelope, error.MissingJsonRpcVersion, error.InvalidJsonRpcVersion, error.InvalidMethodField, error.InvalidErrorField, error.MissingIdField, error.InvalidFrameStructure, error.InvalidIdField => .{ .code = RpcErrorCodes.InvalidRequest, .message = "Invalid Request" },
+        else => .{ .code = RpcErrorCodes.ParseError, .message = "Parse error" },
+    };
+}
+
 pub const Id = union(enum) {
     integer: i64,
     float: f64,
