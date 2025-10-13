@@ -1,6 +1,6 @@
 [gd_scene load_steps=11 format=3 uid="uid://home_page_scene"]
 
-[ext_resource type="Script" path="res://scripts/connection_manager.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/home_page_controller.gd" id="1"]
 
 [node name="HomePage" type="Control"]
 layout_mode = 3
@@ -99,6 +99,12 @@ layout_mode = 2
 placeholder_text = "为自己选一个让其他玩家看到的名字"
 min_size = Vector2(0, 48)
 theme_override_font_sizes/font_size = 18
+
+[node name="RandomNicknameButton" type="Button" parent="CenterContainer/Panel/MarginContainer/VBox/Form"]
+layout_mode = 2
+text = "随机生成昵称"
+theme_override_font_sizes/font_size = 18
+min_size = Vector2(0, 48)
 
 [node name="JoinButton" type="Button" parent="CenterContainer/Panel/MarginContainer/VBox/Form"]
 layout_mode = 2

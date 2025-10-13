@@ -1,5 +1,9 @@
 extends Node
 
+const LobbyUtils = preload("res://scripts/lobby_utils.gd")
+const RandomNickname = preload("res://scripts/random_nickname.gd")
+const MockData = preload("res://scripts/mock_data.gd")
+
 @export var websocket_url: String = "ws://127.0.0.1:7998/"
 @export var timeout_seconds: float = 3.0
 
@@ -16,6 +20,7 @@ var _login_container: Control = null
 var _lobby_container: Control = null
 var _nickname_input: LineEdit = null
 var _join_button: Button = null
+var _generate_nickname_button: Button = null
 var _refresh_rooms_button: Button = null
 var _join_room_button: Button = null
 var _room_list: ItemList = null
@@ -26,6 +31,7 @@ var _lobby_status_label: Label = null
 var _user_info_label: Label = null
 var _room_detail_label: RichTextLabel = null
 var _mock_lobby_button: Button = null
+
 
 var _request_id_seq: int = 0
 var _pending_requests: Dictionary = {}
@@ -40,6 +46,7 @@ var _mock_mode: bool = false
 
 
 func _ready() -> void:
+	RandomNickname.init()
 	_cache_ui_nodes()
 	_show_login_view()
 	_attempt_connection()
@@ -50,6 +57,7 @@ func _cache_ui_nodes() -> void:
 	_lobby_container = get_node_or_null("Lobby") as Control
 	_nickname_input = get_node_or_null("CenterContainer/Panel/MarginContainer/VBox/Form/NicknameInput") as LineEdit
 	_join_button = get_node_or_null("CenterContainer/Panel/MarginContainer/VBox/Form/JoinButton") as Button
+	_generate_nickname_button = get_node_or_null("CenterContainer/Panel/MarginContainer/VBox/Form/RandomNicknameButton") as Button
 	_mock_lobby_button = get_node_or_null("CenterContainer/Panel/MarginContainer/VBox/Form/MockLobbyButton") as Button
 	_user_info_label = get_node_or_null("Lobby/MarginContainer/LobbyVBox/UserRow/UserInfoLabel") as Label
 	_refresh_rooms_button = get_node_or_null("Lobby/MarginContainer/LobbyVBox/UserRow/RefreshRoomsButton") as Button
@@ -68,6 +76,8 @@ func _cache_ui_nodes() -> void:
 	if _join_button:
 		_join_button.disabled = true
 		_join_button.pressed.connect(_on_join_button_pressed)
+	if _generate_nickname_button:
+		_generate_nickname_button.pressed.connect(_on_generate_nickname_pressed)
 	if _mock_lobby_button:
 		_mock_lobby_button.pressed.connect(_on_mock_lobby_button_pressed)
 	if _nickname_input:
@@ -318,6 +328,17 @@ func _on_nickname_submitted(_text: String) -> void:
 		return
 	_on_join_button_pressed()
 
+func _on_generate_nickname_pressed() -> void:
+	if _nickname_input == null:
+		return
+	if !_nickname_input.editable:
+		return
+	var nickname: String = RandomNickname.generate()
+	_nickname_input.text = nickname
+	_nickname_input.caret_column = nickname.length()
+	_nickname_input.select_all()
+	_nickname_input.grab_focus()
+
 func _on_mock_lobby_button_pressed() -> void:
 	_enter_mock_lobby()
 
@@ -339,6 +360,8 @@ func _enter_mock_lobby() -> void:
 	_client = WebSocketPeer.new()
 	if _join_button:
 		_join_button.disabled = true
+	if _generate_nickname_button:
+		_generate_nickname_button.disabled = true
 	if _nickname_input:
 		_nickname_input.editable = false
 	var preview_name := ""
@@ -351,7 +374,7 @@ func _enter_mock_lobby() -> void:
 	_show_lobby_view()
 	if _user_info_label:
 		_user_info_label.text = "当前登录：%s（离线预览）" % preview_name
-	var rooms := _build_mock_rooms()
+	var rooms: Array = MockData.build_mock_rooms()
 	_update_room_list({"rooms": rooms})
 	if _room_list and _room_list.get_item_count() > 0:
 		_room_list.select(0)
@@ -371,48 +394,6 @@ func _enter_mock_lobby() -> void:
 		_player_limit.editable = false
 	_join_room_button_disabled(true)
 
-func _build_mock_rooms() -> Array:
-	return [
-		{
-			"id": 101,
-			"name": "休闲牌桌",
-			"state": "waiting",
-			"player_count": 2,
-			"player_limit": 6,
-			"host_id": 5001,
-			"players": [
-				{"user_id": 5001, "username": "DealerDan", "state": "prepared", "is_host": true},
-				{"user_id": 5002, "username": "LuckyLuna", "state": "not_prepared", "is_host": false},
-			],
-		},
-		{
-			"id": 202,
-			"name": "高额牌桌",
-			"state": "in_game",
-			"player_count": 4,
-			"player_limit": 6,
-			"host_id": 6001,
-			"players": [
-				{"user_id": 6001, "username": "AceAaron", "state": "prepared", "is_host": true},
-				{"user_id": 6002, "username": "BluffBella", "state": "prepared", "is_host": false},
-				{"user_id": 6003, "username": "ChipCharlie", "state": "prepared", "is_host": false},
-				{"user_id": 6004, "username": "RiverRiley", "state": "prepared", "is_host": false},
-			],
-		},
-		{
-			"id": 303,
-			"name": "夜猫子牌桌",
-			"state": "waiting",
-			"player_count": 3,
-			"player_limit": 5,
-			"host_id": 7001,
-			"players": [
-				{"user_id": 7001, "username": "MidnightMia", "state": "prepared", "is_host": true},
-				{"user_id": 7002, "username": "SleeplessSam", "state": "not_prepared", "is_host": false},
-				{"user_id": 7003, "username": "CoffeeKai", "state": "prepared", "is_host": false},
-			],
-		},
-	]
 
 func _on_user_set_name_success(result: Variant) -> void:
 	if _nickname_input:
@@ -509,7 +490,7 @@ func _update_room_list(payload: Variant) -> void:
 		var room_name := str(room_entry.get("name", "房间 %d" % room_id))
 		var player_count := int(room_entry.get("player_count", 0))
 		var player_limit := int(room_entry.get("player_limit", 0))
-		var state_text := _format_room_state(str(room_entry.get("state", "")))
+		var state_text: String = LobbyUtils.format_room_state(str(room_entry.get("state", "")))
 		var label := "%s • %d/%d • %s" % [room_name, player_count, player_limit, state_text]
 		if _room_list:
 			var index := _room_list.add_item(label)
@@ -639,8 +620,8 @@ func _render_room_summary(summary: Variant) -> void:
 	if typeof(summary) != TYPE_DICTIONARY:
 		_room_detail_label.bbcode_text = "选择一个房间查看详情。"
 		return
-	var room_name := _escape_bbcode(str(summary.get("name", "房间")))
-	var state := _format_room_state(str(summary.get("state", "")))
+	var room_name: String = LobbyUtils.escape_bbcode(str(summary.get("name", "房间")))
+	var state: String = LobbyUtils.format_room_state(str(summary.get("state", "")))
 	var player_count := int(summary.get("player_count", 0))
 	var player_limit := int(summary.get("player_limit", 0))
 	var lines: Array[String] = []
@@ -652,8 +633,8 @@ func _render_room_summary(summary: Variant) -> void:
 func _render_room_detail(detail: Variant) -> void:
 	if _room_detail_label == null or typeof(detail) != TYPE_DICTIONARY:
 		return
-	var room_name := _escape_bbcode(str(detail.get("name", "房间")))
-	var state := _format_room_state(str(detail.get("state", "")))
+	var room_name: String = LobbyUtils.escape_bbcode(str(detail.get("name", "房间")))
+	var state: String = LobbyUtils.format_room_state(str(detail.get("state", "")))
 	var players: Array = detail.get("players", [])
 	var player_limit := int(detail.get("player_limit", players.size()))
 	var lines: Array[String] = []
@@ -663,32 +644,13 @@ func _render_room_detail(detail: Variant) -> void:
 	for player_data in players:
 		if typeof(player_data) != TYPE_DICTIONARY:
 			continue
-		var player_name := _escape_bbcode(str(player_data.get("username", "未知")))
+		var player_name: String = LobbyUtils.escape_bbcode(str(player_data.get("username", "未知")))
 		var role := "[b](房主)[/b] " if player_data.get("is_host", false) else ""
-		var ready_state := _format_player_state(str(player_data.get("state", "")))
+		var ready_state: String = LobbyUtils.format_player_state(str(player_data.get("state", "")))
 		lines.append("%s%s [%s]" % [role, player_name, ready_state])
 	_room_detail_label.bbcode_text = "\n".join(lines)
 
-func _format_room_state(state: String) -> String:
-	match state:
-		"waiting":
-			return "等待玩家"
-		"in_game":
-			return "进行中"
-		_:
-			return state.capitalize()
-
-func _format_player_state(state: String) -> String:
-	match state:
-		"prepared":
-			return "已准备"
-		"not_prepared":
-			return "未准备"
-		_:
-			return state.capitalize()
-
-func _escape_bbcode(text: String) -> String:
-	return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+ 
 
 func _set_lobby_status(message: String, is_error: bool) -> void:
 	if _lobby_status_label == null:
@@ -702,6 +664,8 @@ func _show_login_view() -> void:
 		_login_container.visible = true
 	if _lobby_container:
 		_lobby_container.visible = false
+	if _generate_nickname_button:
+		_generate_nickname_button.disabled = false
 	if _nickname_input:
 		_nickname_input.editable = true
 		_nickname_input.select_all()
