@@ -88,7 +88,7 @@ pub const RoomService = struct {
                 .name = room.name,
                 .state = room.state,
                 .player_count = @intCast(room.players.items.len),
-                .player_limit = room.player_limit,
+                .player_limit = room.config.player_limit,
             };
             index += 1;
         }
@@ -132,7 +132,7 @@ pub const RoomService = struct {
             .id = room_id,
             .name = name_copy,
             .state = .waiting,
-            .player_limit = payload.player_limit,
+            .config = .{ .player_limit = payload.player_limit },
             .host_user_id = uid,
         };
         errdefer room.deinit(self.allocator);
@@ -178,7 +178,7 @@ pub const RoomService = struct {
         if (room.state == .in_game) {
             return Error.RoomInProgress;
         }
-        if (room.players.items.len >= room.player_limit) {
+        if (room.players.items.len >= room.config.player_limit) {
             return Error.RoomFull;
         }
 
@@ -297,11 +297,15 @@ pub const RoomService = struct {
     }
 };
 
+const GameConfig = struct {
+    player_limit: u8,
+};
+
 const Room = struct {
     id: u32,
     name: []u8,
     state: messages.RoomStatePayload,
-    player_limit: u8,
+    config: GameConfig,
     host_user_id: i64,
     players: std.ArrayList(messages.RoomPlayerPayload) = .empty,
 
@@ -329,7 +333,7 @@ fn snapshotRoom(room: *Room) messages.RoomDetailPayload {
         .name = room.name,
         .state = room.state,
         .host_id = room.host_user_id,
-        .player_limit = room.player_limit,
+        .player_limit = room.config.player_limit,
         .players = room.players.items,
     };
 }
@@ -369,7 +373,7 @@ fn normalizeRoomName(name: []const u8) Error![]const u8 {
 }
 
 fn ensurePlayerLimit(limit: u8) Error!void {
-    if (limit < 2) {
+    if (limit < 2 or limit > 8) {
         return Error.InvalidPlayerLimit;
     }
 }
