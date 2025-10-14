@@ -20,11 +20,6 @@ inline fn customLog(
     const stderr = std.debug.lockStderrWriter(&buf);
     defer std.debug.unlockStderrWriter();
 
-    if (std.debug.getSelfDebugInfo() catch null) |debug_info| {
-        const addr = @returnAddress();
-        std.debug.printSourceAtAddress(debug_info, stderr, addr, .no_color) catch {};
-    }
-
     nosuspend stderr.print("{s}[{s}] ", .{ color, level_name }) catch return;
     nosuspend stderr.print(format, args) catch return;
     nosuspend stderr.print("\x1b[0m\n", .{}) catch return;
