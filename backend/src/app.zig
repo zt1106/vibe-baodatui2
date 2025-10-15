@@ -28,7 +28,7 @@ pub const GameApp = struct {
     players: std.StringHashMap(Player),
     handlers: std.StringHashMap(HandlerFn),
     mutex: std.Thread.Mutex = .{},
-    user_service: users.Service,
+    user_service: users.UserService,
     room_service: rooms.RoomService,
 
     pub fn init(allocator: std.mem.Allocator) !GameApp {
@@ -36,7 +36,7 @@ pub const GameApp = struct {
             .allocator = allocator,
             .players = std.StringHashMap(Player).init(allocator),
             .handlers = std.StringHashMap(HandlerFn).init(allocator),
-            .user_service = users.Service.init(allocator),
+            .user_service = users.UserService.init(allocator),
             .room_service = rooms.RoomService.init(allocator),
         };
         errdefer self.deinit();

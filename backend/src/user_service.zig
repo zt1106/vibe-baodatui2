@@ -17,12 +17,12 @@ const Entry = struct {
     name_storage: []u8,
 };
 
-pub const Service = struct {
+pub const UserService = struct {
     allocator: std.mem.Allocator,
     users: std.StringHashMap(Entry),
     next_id: i64,
 
-    pub fn init(allocator: std.mem.Allocator) Service {
+    pub fn init(allocator: std.mem.Allocator) UserService {
         return .{
             .allocator = allocator,
             .users = std.StringHashMap(Entry).init(allocator),
@@ -30,7 +30,7 @@ pub const Service = struct {
         };
     }
 
-    pub fn deinit(self: *Service) void {
+    pub fn deinit(self: *UserService) void {
         var it = self.users.iterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.value_ptr.*.name_storage);
@@ -39,7 +39,7 @@ pub const Service = struct {
     }
 
     pub fn handleSetName(
-        self: *Service,
+        self: *UserService,
         state: anytype,
         payload: messages.UserSetNamePayload,
     ) (Error || std.mem.Allocator.Error)!messages.UserInfoPayload {
@@ -80,7 +80,7 @@ pub const Service = struct {
     }
 
     fn createUser(
-        self: *Service,
+        self: *UserService,
         username: []const u8,
     ) (Error || std.mem.Allocator.Error)!User {
         if (self.users.contains(username)) {
@@ -101,7 +101,7 @@ pub const Service = struct {
     }
 
     fn renameUser(
-        self: *Service,
+        self: *UserService,
         current: []const u8,
         desired: []const u8,
     ) (Error || std.mem.Allocator.Error)!User {
@@ -118,14 +118,14 @@ pub const Service = struct {
     }
 
     fn deleteUser(
-        self: *Service,
+        self: *UserService,
         username: []const u8,
     ) Error!void {
         const removed = self.users.fetchRemove(username) orelse return Error.UserNotFound;
         self.allocator.free(removed.value.name_storage);
     }
 
-    fn removeUserById(self: *Service, id: i64) void {
+    fn removeUserById(self: *UserService, id: i64) void {
         var iterator = self.users.iterator();
         while (iterator.next()) |entry| {
             if (entry.value_ptr.*.id == id) {
@@ -138,7 +138,7 @@ pub const Service = struct {
     }
 
     fn assignToConnection(
-        self: *Service,
+        self: *UserService,
         state: anytype,
         username: []const u8,
         id: i64,
@@ -160,7 +160,7 @@ pub const Service = struct {
     }
 
     fn updateConnectionIfMatches(
-        self: *Service,
+        self: *UserService,
         state: anytype,
         current: []const u8,
         desired: []const u8,
@@ -184,7 +184,7 @@ pub const Service = struct {
     }
 
     fn clearConnectionIfMatches(
-        self: *Service,
+        self: *UserService,
         state: anytype,
         username: []const u8,
     ) void {
@@ -224,7 +224,7 @@ fn ensureStatePointer(comptime T: type) void {
 test "user service lifecycle operations" {
     const allocator = std.testing.allocator;
 
-    var service = Service.init(allocator);
+    var service = UserService.init(allocator);
     defer service.deinit();
 
     const TestState = struct {
