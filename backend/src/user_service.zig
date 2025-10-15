@@ -8,24 +8,24 @@ pub const Error = error{
     InvalidUsername,
 };
 
-pub const User = struct {
+pub const UserEntry = struct {
     id: i64,
 };
 
-const Entry = struct {
+const User = struct {
     id: i64,
     name_storage: []u8,
 };
 
 pub const UserService = struct {
     allocator: std.mem.Allocator,
-    users: std.StringHashMap(Entry),
+    users: std.StringHashMap(User),
     next_id: i64,
 
     pub fn init(allocator: std.mem.Allocator) UserService {
         return .{
             .allocator = allocator,
-            .users = std.StringHashMap(Entry).init(allocator),
+            .users = std.StringHashMap(User).init(allocator),
             .next_id = 1,
         };
     }
@@ -82,7 +82,7 @@ pub const UserService = struct {
     fn createUser(
         self: *UserService,
         username: []const u8,
-    ) (Error || std.mem.Allocator.Error)!User {
+    ) (Error || std.mem.Allocator.Error)!UserEntry {
         if (self.users.contains(username)) {
             return Error.UserExists;
         }
@@ -90,21 +90,21 @@ pub const UserService = struct {
         const name_copy = try self.allocator.dupe(u8, username);
         errdefer self.allocator.free(name_copy);
 
-        const entry = Entry{
+        const entry = User{
             .id = self.next_id,
             .name_storage = name_copy,
         };
 
         try self.users.put(name_copy, entry);
         self.next_id += 1;
-        return User{ .id = entry.id };
+        return UserEntry{ .id = entry.id };
     }
 
     fn renameUser(
         self: *UserService,
         current: []const u8,
         desired: []const u8,
-    ) (Error || std.mem.Allocator.Error)!User {
+    ) (Error || std.mem.Allocator.Error)!UserEntry {
         if (self.users.contains(desired)) return Error.UserExists;
 
         const removed = self.users.fetchRemove(current) orelse return Error.UserNotFound;
@@ -112,9 +112,9 @@ pub const UserService = struct {
         errdefer self.allocator.free(new_copy);
         self.allocator.free(removed.value.name_storage);
 
-        const entry = Entry{ .id = removed.value.id, .name_storage = new_copy };
+        const entry = User{ .id = removed.value.id, .name_storage = new_copy };
         try self.users.put(new_copy, entry);
-        return User{ .id = entry.id };
+        return UserEntry{ .id = entry.id };
     }
 
     fn deleteUser(
