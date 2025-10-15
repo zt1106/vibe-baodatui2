@@ -31,6 +31,8 @@ var _lobby_status_label: Label = null
 var _user_info_label: Label = null
 var _room_detail_label: RichTextLabel = null
 var _mock_lobby_button: Button = null
+var _poker_chips: Array[ColorRect] = []
+var _animation_time: float = 0.0
 
 
 var _request_id_seq: int = 0
@@ -75,6 +77,7 @@ func _ready() -> void:
 	_cache_ui_nodes()
 	_show_login_view()
 	_attempt_connection()
+	_start_background_animation()
 
 func _cache_ui_nodes() -> void:
 	_error_dialog = get_node_or_null("ErrorDialog") as AcceptDialog
@@ -93,6 +96,11 @@ func _cache_ui_nodes() -> void:
 	_room_name_input = get_node_or_null("Lobby/MarginContainer/LobbyVBox/CreateRoomRow/RoomNameInput") as LineEdit
 	_player_limit = get_node_or_null("Lobby/MarginContainer/LobbyVBox/CreateRoomRow/PlayerLimit") as SpinBox
 	_create_room_button = get_node_or_null("Lobby/MarginContainer/LobbyVBox/CreateRoomRow/CreateRoomButton") as Button
+
+	# Cache poker chip nodes for animation
+	_poker_chips.append(get_node_or_null("PokerChip1") as ColorRect)
+	_poker_chips.append(get_node_or_null("PokerChip2") as ColorRect)
+	_poker_chips.append(get_node_or_null("PokerChip3") as ColorRect)
 
 	if _error_dialog:
 		connection_failed.connect(_on_connection_failed)
@@ -149,6 +157,9 @@ func _process(delta: float) -> void:
 				_on_connection_error()
 			elif _connected:
 				_on_connection_closed()
+
+	# Animate background poker chips
+	_animate_poker_chips(delta)
 
 func _process_incoming_messages() -> void:
 	while _client.get_available_packet_count() > 0:
@@ -721,3 +732,15 @@ func _show_error(message: String) -> void:
 func _join_room_button_disabled(disabled: bool) -> void:
 	if _join_room_button:
 		_join_room_button.disabled = disabled
+
+func _start_background_animation() -> void:
+	_animation_time = 0.0
+
+func _animate_poker_chips(delta: float) -> void:
+	_animation_time += delta
+	for i in range(_poker_chips.size()):
+		var chip = _poker_chips[i]
+		if chip:
+			var offset = sin(_animation_time * 0.5 + i * 2.0) * 5.0
+			chip.position.y += offset * delta
+			chip.rotation += delta * 0.1 * (1 if i % 2 == 0 else -1)
