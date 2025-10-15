@@ -17,20 +17,8 @@ pub const ClientError = error{
 test "ws_test_client connects and handles ping" {
     try withReadyClient(22001, struct {
         fn run(ctx: *IntegrationContext) !void {
-            const id = try ctx.client.sendRequest("ping", messages.PingPayload{});
-
-            var frame = try ctx.client.expectResponse(ctx.allocator, 2000, id);
-            defer frame.deinit();
-
-            switch (frame.kind()) {
-                .response => {
-                    const response = try frame.response();
-                    const payload = try response.resultAs(messages.SystemPayload);
-                    try std.testing.expectEqualStrings("pong", payload.code);
-                },
-                .rpc_error => return error.UnexpectedMessageType,
-                .call => return error.UnexpectedMessageType,
-            }
+            const payload = try ctx.client.request(ctx.allocator, 2000, "ping", messages.PingPayload{}, messages.SystemPayload);
+            try std.testing.expectEqualStrings("pong", payload.code);
         }
     }.run);
 }
@@ -180,6 +168,14 @@ pub const TestClient = struct {
         defer self.allocator.free(frame);
         try self.client.write(frame);
         return id;
+    }
+
+    pub fn request(self: *TestClient, allocator: std.mem.Allocator, timeout_ms: u32, method: []const u8, params: anytype, comptime ResponseType: type) !ResponseType {
+        const id = try self.sendRequest(method, params);
+        var frame = try self.expectResponse(allocator, timeout_ms, id);
+        defer frame.deinit();
+        const response = try frame.response();
+        return try response.resultAs(ResponseType);
     }
 
     pub fn sendNotification(self: *TestClient, method: []const u8, params: anytype) !void {

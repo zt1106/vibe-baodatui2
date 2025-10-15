@@ -268,51 +268,14 @@ test "integration: user set name and rename" {
         fn run(ctx: *ws_test_client.IntegrationContext) !void {
             const allocator = ctx.allocator;
 
-            const set_id = try ctx.client.sendRequest("user_set_name", messages.UserSetNamePayload{ .nickname = "Alice" });
-            const user_id = try expectUserResponse(allocator, &ctx.client, set_id, "Alice");
+            const set_payload = try ctx.client.request(allocator, 2000, "user_set_name", messages.UserSetNamePayload{ .nickname = "Alice" }, messages.UserInfoPayload);
+            const user_id = set_payload.id;
 
-            const rename_id = try ctx.client.sendRequest("user_set_name", messages.UserSetNamePayload{ .nickname = "Alice Updated" });
-            const renamed_id = try expectUserResponse(allocator, &ctx.client, rename_id, "Alice Updated");
-            try std.testing.expectEqual(user_id, renamed_id);
+            const rename_payload = try ctx.client.request(allocator, 2000, "user_set_name", messages.UserSetNamePayload{ .nickname = "Alice Updated" }, messages.UserInfoPayload);
+            try std.testing.expectEqual(user_id, rename_payload.id);
+            try std.testing.expectEqualStrings("Alice Updated", rename_payload.username);
         }
     }.run);
 }
 
-fn expectUserResponse(
-    allocator: std.mem.Allocator,
-    client: *ws_test_client.TestClient,
-    request_id: messages.Id,
-    expected_username: []const u8,
-) (ws_test_client.ClientError || PayloadError || anyerror)!i64 {
-    var frame = try client.expectResponse(allocator, 2000, request_id);
-    defer frame.deinit();
-
-    const response = switch (frame.kind()) {
-        .response => try frame.response(),
-        else => return PayloadError.InvalidPayload,
-    };
-
-    const payload_value = response.resultValue();
-    const payload_obj = switch (payload_value) {
-        .object => |obj| obj,
-        else => return PayloadError.InvalidPayload,
-    };
-
-    const username_value = payload_obj.get("username") orelse return PayloadError.InvalidPayload;
-    const username_str = switch (username_value) {
-        .string => |s| s,
-        else => return PayloadError.InvalidPayload,
-    };
-    try std.testing.expectEqualStrings(expected_username, username_str);
-
-    const id_value = payload_obj.get("id") orelse return PayloadError.InvalidPayload;
-    const id_int = switch (id_value) {
-        .integer => |i| i,
-        .float => |f| @as(i64, @intFromFloat(f)),
-        else => return PayloadError.InvalidPayload,
-    };
-    try std.testing.expect(id_int > 0);
-
-    return id_int;
-}
-const PayloadError = error{InvalidPayload};
+// Removed expectUserResponse function as it's no longer needed with the new request method

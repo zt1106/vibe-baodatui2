@@ -27,7 +27,6 @@ pub fn mapParseFrameError(err: anyerror) struct { code: i64, message: []const u8
 
 pub const Id = union(enum) {
     integer: i64,
-    float: f64,
     string: []const u8,
     null: void,
 
@@ -268,7 +267,6 @@ pub fn parseFrame(allocator: std.mem.Allocator, raw: []const u8) !Frame {
 fn parseId(value: JsonValue) !Id {
     return switch (value) {
         .integer => |int_value| Id{ .integer = int_value },
-        .float => |float_value| Id{ .float = float_value },
         .string => |string_value| Id{ .string = string_value },
         .null => NullId,
         else => error.InvalidIdField,
@@ -278,7 +276,6 @@ fn parseId(value: JsonValue) !Id {
 fn writeId(stringify: *std.json.Stringify, id: Id) !void {
     switch (id) {
         .integer => |value| try stringify.write(value),
-        .float => |value| try stringify.write(value),
         .string => |value| try stringify.write(value),
         .null => try stringify.write(JsonValue{ .null = {} }),
     }
@@ -421,10 +418,6 @@ pub fn idsEqual(a: Id, b: Id) bool {
             .integer => |other| value == other,
             else => unreachable,
         },
-        .float => |value| switch (b) {
-            .float => |other| value == other,
-            else => unreachable,
-        },
         .string => |value| switch (b) {
             .string => |other| std.mem.eql(u8, value, other),
             else => unreachable,
@@ -436,7 +429,6 @@ pub fn idsEqual(a: Id, b: Id) bool {
 pub fn idToInt(id: Id) ?i64 {
     return switch (id) {
         .integer => |value| value,
-        .float => null,
         .string => null,
         .null => null,
     };
