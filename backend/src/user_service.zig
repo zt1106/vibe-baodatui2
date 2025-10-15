@@ -38,10 +38,6 @@ pub const Service = struct {
         self.users.deinit();
     }
 
-    pub fn ensureSchema(self: *Service) void {
-        _ = self;
-    }
-
     pub fn handleSetName(
         self: *Service,
         state: anytype,
@@ -230,7 +226,6 @@ test "user service lifecycle operations" {
 
     var service = Service.init(allocator);
     defer service.deinit();
-    service.ensureSchema();
 
     const TestState = struct {
         user_name: ?[]u8 = null,

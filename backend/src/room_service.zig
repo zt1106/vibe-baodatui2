@@ -57,10 +57,6 @@ pub const RoomService = struct {
         self.user_to_room.deinit();
     }
 
-    pub fn ensureSchema(self: *RoomService) void {
-        _ = self;
-    }
-
     pub fn listRooms(
         self: *RoomService,
         allocator: std.mem.Allocator,

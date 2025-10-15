@@ -41,7 +41,6 @@ pub const GameApp = struct {
         };
         errdefer self.deinit();
 
-        try self.ensureSchema();
         try self.registerRequestHandlerTyped(
             messages.UserSetNamePayload,
             messages.UserInfoPayload,
@@ -291,7 +290,7 @@ pub const GameApp = struct {
 
     fn logOutbound(self: *GameApp, frame: []const u8) void {
         const pretty = messages.formatPrettyJson(self.allocator, frame) catch |err| {
-            log.info("WebSocket -> (raw, {s}): {s}", .{@errorName(err), frame});
+            log.info("WebSocket -> (raw, {s}): {s}", .{ @errorName(err), frame });
             return;
         };
         defer self.allocator.free(pretty);
@@ -344,11 +343,6 @@ pub const GameApp = struct {
         defer self.allocator.free(frame);
         self.logOutbound(frame);
         try conn.write(frame);
-    }
-
-    fn ensureSchema(self: *GameApp) !void {
-        self.user_service.ensureSchema();
-        self.room_service.ensureSchema();
     }
 };
 
