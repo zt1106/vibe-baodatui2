@@ -8,15 +8,10 @@ const rooms = @import("room_service.zig");
 const log = std.log.scoped(.game_app);
 
 pub const ConnectionState = struct {
-    player_name: ?[]u8 = null,
     user_name: ?[]u8 = null,
     user_id: ?i64 = null,
     room_id: ?u32 = null,
     disconnected: bool = false,
-};
-
-const Player = struct {
-    score: u32 = 0,
 };
 
 const HandlerFn = *const fn (*GameApp, *ws.Conn, *ConnectionState, *messages.Call) anyerror!void;
@@ -25,7 +20,6 @@ pub const RegisterHandlerError = error{HandlerExists} || std.mem.Allocator.Error
 
 pub const GameApp = struct {
     allocator: std.mem.Allocator,
-    players: std.StringHashMap(Player),
     handlers: std.StringHashMap(HandlerFn),
     mutex: std.Thread.Mutex = .{},
     user_service: users.UserService,
@@ -34,7 +28,6 @@ pub const GameApp = struct {
     pub fn init(allocator: std.mem.Allocator) !GameApp {
         var self = GameApp{
             .allocator = allocator,
-            .players = std.StringHashMap(Player).init(allocator),
             .handlers = std.StringHashMap(HandlerFn).init(allocator),
             .user_service = users.UserService.init(allocator),
             .room_service = rooms.RoomService.init(allocator),
@@ -92,13 +85,6 @@ pub const GameApp = struct {
         self.room_service.deinit();
         self.user_service.deinit();
 
-        var it = self.players.iterator();
-        while (it.next()) |entry| {
-            const name = entry.key_ptr.*;
-            self.allocator.free(@constCast(name));
-        }
-        self.players.deinit();
-
         var hit = self.handlers.iterator();
         while (hit.next()) |entry| {
             const name = entry.key_ptr.*;
@@ -150,20 +136,8 @@ pub const GameApp = struct {
         }
         state.disconnected = true;
 
-        if (state.player_name) |name| {
-            const key: []const u8 = name;
-            self.mutex.lock();
-            const removed = self.players.remove(key);
-            self.mutex.unlock();
-
-            if (removed) {
-                log.info("player disconnected: {s}", .{key});
-            } else {
-                log.info("connection disconnected without registered player", .{});
-            }
-
-            self.allocator.free(name);
-            state.player_name = null;
+        if (state.user_name) |user| {
+            log.info("user disconnected: {s}", .{user});
         } else {
             log.info("connection closed before join", .{});
         }
@@ -209,14 +183,7 @@ pub const GameApp = struct {
                 state: *ConnectionState,
                 rpc_call: *messages.Call,
             ) anyerror!void {
-                const payload = rpc_call.paramsAs(Payload) catch |err| {
-                    if (rpc_call.idValue()) |id| {
-                        try app.sendError(conn, id, messages.RpcErrorCodes.InvalidParams, "Invalid params");
-                    } else {
-                        log.warn("invalid params for notification method {s}: {}", .{ rpc_call.methodName(), err });
-                    }
-                    return;
-                };
+                const payload = app.parseOrReject(conn, rpc_call, Payload) orelse return;
                 try func(app, conn, state, payload);
             }
         };
@@ -239,14 +206,7 @@ pub const GameApp = struct {
                 state: *ConnectionState,
                 rpc_call: *messages.Call,
             ) anyerror!void {
-                const payload = rpc_call.paramsAs(RequestPayload) catch |err| {
-                    if (rpc_call.idValue()) |id| {
-                        try app.sendError(conn, id, messages.RpcErrorCodes.InvalidParams, "Invalid params");
-                    } else {
-                        log.warn("invalid params for notification method {s}: {}", .{ rpc_call.methodName(), err });
-                    }
-                    return;
-                };
+                const payload = app.parseOrReject(conn, rpc_call, RequestPayload) orelse return;
 
                 if (@typeInfo(ResponsePayload) == .void) {
                     try func(app, conn, state, payload);
@@ -264,6 +224,24 @@ pub const GameApp = struct {
         };
 
         try self.registerHandler(name, thunk.call);
+    }
+
+    fn parseOrReject(
+        self: *GameApp,
+        conn: *ws.Conn,
+        call: *messages.Call,
+        comptime Payload: type,
+    ) ?Payload {
+        return call.paramsAs(Payload) catch |err| {
+            if (call.idValue()) |id| {
+                self.sendError(conn, id, messages.RpcErrorCodes.InvalidParams, "Invalid params") catch |write_err| {
+                    log.err("failed to send invalid params response: {}", .{write_err});
+                };
+            } else {
+                log.warn("invalid params for notification method {s}: {}", .{ call.methodName(), err });
+            }
+            return null;
+        };
     }
 
     fn handleUserSetName(
@@ -352,14 +330,7 @@ fn handleRoomList(
     _: *ConnectionState,
     call: *messages.Call,
 ) anyerror!void {
-    _ = call.paramsAs(messages.RoomListRequestPayload) catch |err| {
-        if (call.idValue()) |id| {
-            try self.sendError(conn, id, messages.RpcErrorCodes.InvalidParams, "Invalid params");
-        } else {
-            log.warn("invalid params for notification method {s}: {}", .{ call.methodName(), err });
-        }
-        return;
-    };
+    _ = self.parseOrReject(conn, call, messages.RoomListRequestPayload) orelse return;
     var view = try self.room_service.listRooms(self.allocator);
     defer view.deinit();
     if (call.idValue()) |id| {
