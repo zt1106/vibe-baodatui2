@@ -14,15 +14,6 @@ pub const ClientError = error{
     Timeout,
 };
 
-test "ws_test_client connects and handles ping" {
-    try withReadyClient(22001, struct {
-        fn run(ctx: *IntegrationContext) !void {
-            const payload = try ctx.client.request(ctx.allocator, 2000, "ping", messages.PingPayload{}, messages.SystemPayload);
-            try std.testing.expectEqualStrings("pong", payload.code);
-        }
-    }.run);
-}
-
 pub const IntegrationContext = struct {
     allocator: std.mem.Allocator,
     server: test_support.GameServerFixture,

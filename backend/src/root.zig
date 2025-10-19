@@ -6,6 +6,7 @@ pub const app = @import("app.zig");
 const user_service = @import("user_service.zig");
 pub const room_service = @import("room_service.zig");
 pub const ws_test_client = @import("ws_test_client.zig");
+pub const integration_tests = @import("integration_tests/root.zig");
 
 test "messages roundtrip" {
     const allocator = std.testing.allocator;
@@ -29,4 +30,5 @@ test "all module tests are wired" {
     std.testing.refAllDecls(user_service);
     std.testing.refAllDecls(room_service);
     std.testing.refAllDecls(ws_test_client);
+    std.testing.refAllDecls(integration_tests);
 }
