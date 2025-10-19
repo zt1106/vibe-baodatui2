@@ -8,6 +8,7 @@ pub const Error = error{
     RoomNameExists,
     InvalidRoomName,
     InvalidPlayerLimit,
+    PlayerLimitTooLow,
     RoomNotFound,
     RoomFull,
     RoomInProgress,
@@ -258,6 +259,32 @@ pub const RoomService = struct {
         return snapshotRoom(room);
     }
 
+    pub fn updateConfig(
+        self: *RoomService,
+        user_id: ?i64,
+        payload: messages.RoomConfigUpdatePayload,
+    ) Error!messages.RoomDetailPayload {
+        const uid = try requireLoggedIn(user_id);
+
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const access = try getRoomForUserLocked(self, uid);
+        const room = access.room;
+
+        if (room.host_user_id != uid) {
+            return Error.NotHost;
+        }
+        try ensureRoomWaiting(room);
+        try ensurePlayerLimit(payload.player_limit);
+        if (payload.player_limit < room.players.items.len) {
+            return Error.PlayerLimitTooLow;
+        }
+
+        room.config.player_limit = payload.player_limit;
+        return snapshotRoom(room);
+    }
+
     pub fn handleDisconnect(self: *RoomService, user_id: i64) void {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -307,7 +334,7 @@ fn snapshotRoom(room: *Room) messages.RoomDetailPayload {
         .name = room.name,
         .state = room.state,
         .host_id = room.host_user_id,
-        .player_limit = room.config.player_limit,
+        .config = .{ .player_limit = room.config.player_limit },
         .players = room.players.items,
     };
 }
@@ -488,4 +515,28 @@ test "room service reassigns host when original host leaves" {
     try std.testing.expectEqual(@as(i64, 2), room_ptr.players.items[0].user_id);
     try std.testing.expect(!room_ptr.players.items[1].is_host);
     try std.testing.expectEqual(@as(i64, 3), room_ptr.players.items[1].user_id);
+}
+
+test "room service enforces config updates" {
+    const allocator = std.testing.allocator;
+
+    var service = RoomService.init(allocator);
+    defer service.deinit();
+
+    const host_id: i64 = 10;
+    var detail = try service.createRoom(host_id, "Host", .{
+        .name = "Config Room",
+        .player_limit = 5,
+    });
+
+    _ = try service.joinRoom(11, "Bob", .{ .room_id = detail.id });
+    _ = try service.joinRoom(12, "Charlie", .{ .room_id = detail.id });
+    _ = try service.joinRoom(13, "Dana", .{ .room_id = detail.id });
+
+    detail = try service.updateConfig(host_id, .{ .player_limit = 6 });
+    try std.testing.expectEqual(@as(u8, 6), detail.config.player_limit);
+
+    try std.testing.expectError(Error.NotHost, service.updateConfig(11, .{ .player_limit = 6 }));
+    try std.testing.expectError(Error.PlayerLimitTooLow, service.updateConfig(host_id, .{ .player_limit = 3 }));
+    try std.testing.expectError(Error.InvalidPlayerLimit, service.updateConfig(host_id, .{ .player_limit = 1 }));
 }

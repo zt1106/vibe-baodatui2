@@ -77,6 +77,12 @@ pub const GameApp = struct {
             "room_start",
             handleRoomStart,
         );
+        try self.registerRequestHandlerTyped(
+            messages.RoomConfigUpdatePayload,
+            messages.RoomDetailPayload,
+            "room_config_update",
+            handleRoomConfigUpdate,
+        );
 
         return self;
     }
@@ -387,6 +393,17 @@ fn handleRoomStart(
     _: messages.RoomStartPayload,
 ) anyerror!messages.RoomDetailPayload {
     const detail = try self.room_service.startGame(state.user_id);
+    state.room_id = detail.id;
+    return detail;
+}
+
+fn handleRoomConfigUpdate(
+    self: *GameApp,
+    _: *ws.Conn,
+    state: *ConnectionState,
+    payload: messages.RoomConfigUpdatePayload,
+) anyerror!messages.RoomDetailPayload {
+    const detail = try self.room_service.updateConfig(state.user_id, payload);
     state.room_id = detail.id;
     return detail;
 }

@@ -478,12 +478,16 @@ pub const RoomPlayerPayload = struct {
     is_host: bool,
 };
 
+pub const RoomConfigPayload = struct {
+    player_limit: u8,
+};
+
 pub const RoomDetailPayload = struct {
     id: u32,
     name: []const u8,
     state: RoomStatePayload,
     host_id: i64,
-    player_limit: u8,
+    config: RoomConfigPayload,
     players: []const RoomPlayerPayload,
 };
 
@@ -510,6 +514,10 @@ pub const RoomLeaveResponsePayload = struct {
 
 pub const RoomReadyPayload = struct {
     prepared: bool,
+};
+
+pub const RoomConfigUpdatePayload = struct {
+    player_limit: u8,
 };
 
 pub const RoomStartPayload = struct {};

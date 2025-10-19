@@ -9,6 +9,7 @@ static func build_mock_rooms() -> Array:
 			"state": "waiting",
 			"player_count": 2,
 			"player_limit": 6,
+			"config": {"player_limit": 6},
 			"host_id": 5001,
 			"players": [
 				{"user_id": 5001, "username": "DealerDan", "state": "prepared", "is_host": true},
@@ -21,6 +22,7 @@ static func build_mock_rooms() -> Array:
 			"state": "in_game",
 			"player_count": 4,
 			"player_limit": 6,
+			"config": {"player_limit": 6},
 			"host_id": 6001,
 			"players": [
 				{"user_id": 6001, "username": "AceAaron", "state": "prepared", "is_host": true},
@@ -35,6 +37,7 @@ static func build_mock_rooms() -> Array:
 			"state": "waiting",
 			"player_count": 3,
 			"player_limit": 5,
+			"config": {"player_limit": 5},
 			"host_id": 7001,
 			"players": [
 				{"user_id": 7001, "username": "MidnightMia", "state": "prepared", "is_host": true},
@@ -43,5 +46,4 @@ static func build_mock_rooms() -> Array:
 			],
 		},
 	]
-
 

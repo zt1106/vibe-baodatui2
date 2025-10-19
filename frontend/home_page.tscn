@@ -435,6 +435,112 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "创建并成为房主"
 
+[node name="RoomView" type="Control" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="RoomView"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 40
+theme_override_constants/margin_top = 40
+theme_override_constants/margin_right = 40
+theme_override_constants/margin_bottom = 40
+
+[node name="RoomVBox" type="VBoxContainer" parent="RoomView/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="RoomTitle" type="Label" parent="RoomView/MarginContainer/RoomVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "房间"
+
+[node name="RoomStateLabel" type="Label" parent="RoomView/MarginContainer/RoomVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+autowrap_mode = 2
+
+[node name="RoomStatusLabel" type="Label" parent="RoomView/MarginContainer/RoomVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+autowrap_mode = 2
+
+[node name="ContentRow" type="HBoxContainer" parent="RoomView/MarginContainer/RoomVBox"]
+layout_mode = 2
+theme_override_constants/separation = 24
+
+[node name="PlayersColumn" type="VBoxContainer" parent="RoomView/MarginContainer/RoomVBox/ContentRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="PlayersLabel" type="Label" parent="RoomView/MarginContainer/RoomVBox/ContentRow/PlayersColumn"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "玩家列表"
+
+[node name="PlayersList" type="ItemList" parent="RoomView/MarginContainer/RoomVBox/ContentRow/PlayersColumn"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 18
+select_mode = 0
+
+[node name="ActionsColumn" type="VBoxContainer" parent="RoomView/MarginContainer/RoomVBox/ContentRow"]
+layout_mode = 2
+size_flags_horizontal = 2
+theme_override_constants/separation = 16
+
+[node name="ReadyButton" type="Button" parent="RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "准备"
+disabled = true
+
+[node name="LeaveButton" type="Button" parent="RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "离开房间"
+disabled = true
+
+[node name="ConfigPanel" type="VBoxContainer" parent="RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ConfigTitle" type="Label" parent="RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/ConfigPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "房间设置"
+
+[node name="PlayerLimitSpin" type="SpinBox" parent="RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/ConfigPanel"]
+layout_mode = 2
+min_value = 2.0
+max_value = 8.0
+value = 4.0
+step = 1.0
+editable = false
+
+[node name="ApplyConfigButton" type="Button" parent="RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/ConfigPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "保存设置"
+disabled = true
+
+[node name="ConfigHint" type="Label" parent="RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/ConfigPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+autowrap_mode = 2
+text = "只有房主可以修改设置。"
+
 [node name="ErrorDialog" type="AcceptDialog" parent="."]
 title = "连接错误"
 position = Vector2i(480, 260)
