@@ -1,3 +1,6 @@
+## Zig Version
+- Current project using the Zig version 0.15.2, please make sure the version is correct when searching documents
+
 ## Build Instructions
 - Run `zig build` in backend folder to compile the backend server
 
