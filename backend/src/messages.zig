@@ -281,12 +281,7 @@ fn writeId(stringify: *std.json.Stringify, id: Id) !void {
     }
 }
 
-pub fn encodeRequest(
-    allocator: std.mem.Allocator,
-    method: []const u8,
-    params: anytype,
-    id: Id,
-) ![]u8 {
+fn encodeEnvelope(allocator: std.mem.Allocator, writer: anytype) ![]u8 {
     var aw = AllocWriter.init(allocator);
     defer aw.deinit();
 
@@ -298,15 +293,37 @@ pub fn encodeRequest(
     try stringify.beginObject();
     try stringify.objectField("jsonrpc");
     try stringify.write(JsonRpcVersion);
-    try stringify.objectField("id");
-    try writeId(&stringify, id);
-    try stringify.objectField("method");
-    try stringify.write(method);
-    try stringify.objectField("params");
-    try stringify.write(params);
+    try writer.write(&stringify);
     try stringify.endObject();
 
     return try aw.toOwnedSlice();
+}
+
+pub fn encodeRequest(
+    allocator: std.mem.Allocator,
+    method: []const u8,
+    params: anytype,
+    id: Id,
+) ![]u8 {
+    const Writer = struct {
+        id: Id,
+        method: []const u8,
+        params: @TypeOf(params),
+        fn write(self: @This(), stringify: *std.json.Stringify) !void {
+            try stringify.objectField("id");
+            try writeId(stringify, self.id);
+            try stringify.objectField("method");
+            try stringify.write(self.method);
+            try stringify.objectField("params");
+            try stringify.write(self.params);
+        }
+    };
+
+    return encodeEnvelope(allocator, Writer{
+        .id = id,
+        .method = method,
+        .params = params,
+    });
 }
 
 pub fn encodeNotification(
@@ -314,24 +331,21 @@ pub fn encodeNotification(
     method: []const u8,
     params: anytype,
 ) ![]u8 {
-    var aw = AllocWriter.init(allocator);
-    defer aw.deinit();
-
-    var stringify = std.json.Stringify{
-        .writer = &aw.writer,
-        .options = .{ .whitespace = .minified },
+    const Writer = struct {
+        method: []const u8,
+        params: @TypeOf(params),
+        fn write(self: @This(), stringify: *std.json.Stringify) !void {
+            try stringify.objectField("method");
+            try stringify.write(self.method);
+            try stringify.objectField("params");
+            try stringify.write(self.params);
+        }
     };
 
-    try stringify.beginObject();
-    try stringify.objectField("jsonrpc");
-    try stringify.write(JsonRpcVersion);
-    try stringify.objectField("method");
-    try stringify.write(method);
-    try stringify.objectField("params");
-    try stringify.write(params);
-    try stringify.endObject();
-
-    return try aw.toOwnedSlice();
+    return encodeEnvelope(allocator, Writer{
+        .method = method,
+        .params = params,
+    });
 }
 
 pub fn encodeResponse(
@@ -339,24 +353,21 @@ pub fn encodeResponse(
     id: Id,
     result: anytype,
 ) ![]u8 {
-    var aw = AllocWriter.init(allocator);
-    defer aw.deinit();
-
-    var stringify = std.json.Stringify{
-        .writer = &aw.writer,
-        .options = .{ .whitespace = .minified },
+    const Writer = struct {
+        id: Id,
+        result: @TypeOf(result),
+        fn write(self: @This(), stringify: *std.json.Stringify) !void {
+            try stringify.objectField("id");
+            try writeId(stringify, self.id);
+            try stringify.objectField("result");
+            try stringify.write(self.result);
+        }
     };
 
-    try stringify.beginObject();
-    try stringify.objectField("jsonrpc");
-    try stringify.write(JsonRpcVersion);
-    try stringify.objectField("id");
-    try writeId(&stringify, id);
-    try stringify.objectField("result");
-    try stringify.write(result);
-    try stringify.endObject();
-
-    return try aw.toOwnedSlice();
+    return encodeEnvelope(allocator, Writer{
+        .id = id,
+        .result = result,
+    });
 }
 
 pub fn encodeResponseNull(
@@ -372,33 +383,32 @@ pub fn encodeError(
     code: i64,
     message: []const u8,
 ) ![]u8 {
-    var aw = AllocWriter.init(allocator);
-    defer aw.deinit();
-
-    var stringify = std.json.Stringify{
-        .writer = &aw.writer,
-        .options = .{ .whitespace = .minified },
+    const Writer = struct {
+        id: ?Id,
+        code: i64,
+        message: []const u8,
+        fn write(self: @This(), stringify: *std.json.Stringify) !void {
+            try stringify.objectField("id");
+            if (self.id) |value| {
+                try writeId(stringify, value);
+            } else {
+                try stringify.write(JsonValue{ .null = {} });
+            }
+            try stringify.objectField("error");
+            try stringify.beginObject();
+            try stringify.objectField("code");
+            try stringify.write(self.code);
+            try stringify.objectField("message");
+            try stringify.write(self.message);
+            try stringify.endObject();
+        }
     };
 
-    try stringify.beginObject();
-    try stringify.objectField("jsonrpc");
-    try stringify.write(JsonRpcVersion);
-    try stringify.objectField("id");
-    if (id) |value| {
-        try writeId(&stringify, value);
-    } else {
-        try stringify.write(JsonValue{ .null = {} });
-    }
-    try stringify.objectField("error");
-    try stringify.beginObject();
-    try stringify.objectField("code");
-    try stringify.write(code);
-    try stringify.objectField("message");
-    try stringify.write(message);
-    try stringify.endObject();
-    try stringify.endObject();
-
-    return try aw.toOwnedSlice();
+    return encodeEnvelope(allocator, Writer{
+        .id = id,
+        .code = code,
+        .message = message,
+    });
 }
 
 pub fn formatPrettyJson(allocator: std.mem.Allocator, raw: []const u8) ![]u8 {
