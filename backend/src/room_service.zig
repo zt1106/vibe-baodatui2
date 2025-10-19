@@ -102,8 +102,8 @@ pub const RoomService = struct {
         username: ?[]const u8,
         payload: messages.RoomCreatePayload,
     ) (Error || std.mem.Allocator.Error)!messages.RoomDetailPayload {
-        const uid = user_id orelse return Error.NotLoggedIn;
-        const uname = username orelse return Error.MissingUsername;
+        const uid = try requireLoggedIn(user_id);
+        const uname = try requireUsername(username);
 
         const trimmed_name = try normalizeRoomName(payload.name);
         try ensurePlayerLimit(payload.player_limit);
@@ -111,9 +111,7 @@ pub const RoomService = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        if (self.user_to_room.contains(uid)) {
-            return Error.AlreadyInRoom;
-        }
+        try ensureUserNotInRoomLocked(self, uid);
         if (self.rooms_by_name.contains(trimmed_name)) {
             return Error.RoomNameExists;
         }
@@ -159,24 +157,16 @@ pub const RoomService = struct {
         username: ?[]const u8,
         payload: messages.RoomJoinPayload,
     ) (Error || std.mem.Allocator.Error)!messages.RoomDetailPayload {
-        const uid = user_id orelse return Error.NotLoggedIn;
-        const uname = username orelse return Error.MissingUsername;
+        const uid = try requireLoggedIn(user_id);
+        const uname = try requireUsername(username);
 
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        if (self.user_to_room.contains(uid)) {
-            return Error.AlreadyInRoom;
-        }
+        try ensureUserNotInRoomLocked(self, uid);
 
-        const room = self.rooms.getPtr(payload.room_id) orelse return Error.RoomNotFound;
-
-        if (room.state == .in_game) {
-            return Error.RoomInProgress;
-        }
-        if (room.players.items.len >= room.config.player_limit) {
-            return Error.RoomFull;
-        }
+        const room = try getRoomByIdLocked(self, payload.room_id);
+        try ensureRoomJoinable(room);
 
         const name_copy = try self.allocator.dupe(u8, uname);
         var added = false;
@@ -199,23 +189,18 @@ pub const RoomService = struct {
         self: *RoomService,
         user_id: ?i64,
     ) Error!messages.RoomLeaveResponsePayload {
-        const uid = user_id orelse return Error.NotLoggedIn;
+        const uid = try requireLoggedIn(user_id);
 
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        const room_id_ptr = self.user_to_room.getPtr(uid) orelse return Error.NotInRoom;
-        const room_id = room_id_ptr.*;
-
-        const room = self.rooms.getPtr(room_id) orelse return Error.RoomNotFound;
-        try tryRemovePlayer(self, room, uid);
+        const access = try getRoomForUserLocked(self, uid);
+        try tryRemovePlayer(self, access.room, uid);
         _ = self.user_to_room.remove(uid);
 
-        if (room.players.items.len == 0) {
-            removeRoomLocked(self, room_id);
-        }
+        cleanupRoomIfEmpty(self, access);
 
-        return .{ .room_id = room_id };
+        return .{ .room_id = access.id };
     }
 
     pub fn setPrepared(
@@ -223,17 +208,15 @@ pub const RoomService = struct {
         user_id: ?i64,
         payload: messages.RoomReadyPayload,
     ) Error!messages.RoomDetailPayload {
-        const uid = user_id orelse return Error.NotLoggedIn;
+        const uid = try requireLoggedIn(user_id);
 
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        const room_id = self.user_to_room.get(uid) orelse return Error.NotInRoom;
-        const room = self.rooms.getPtr(room_id) orelse return Error.RoomNotFound;
+        const access = try getRoomForUserLocked(self, uid);
+        const room = access.room;
 
-        if (room.state == .in_game) {
-            return Error.RoomInProgress;
-        }
+        try ensureRoomWaiting(room);
 
         const index = room.playerIndex(uid) orelse return Error.NotInRoom;
         room.players.items[index].state = if (payload.prepared)
@@ -248,17 +231,15 @@ pub const RoomService = struct {
         self: *RoomService,
         user_id: ?i64,
     ) Error!messages.RoomDetailPayload {
-        const uid = user_id orelse return Error.NotLoggedIn;
+        const uid = try requireLoggedIn(user_id);
 
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        const room_id = self.user_to_room.get(uid) orelse return Error.NotInRoom;
-        const room = self.rooms.getPtr(room_id) orelse return Error.RoomNotFound;
+        const access = try getRoomForUserLocked(self, uid);
+        const room = access.room;
 
-        if (room.state == .in_game) {
-            return Error.RoomInProgress;
-        }
+        try ensureRoomWaiting(room);
         if (room.host_user_id != uid) {
             return Error.NotHost;
         }
@@ -287,9 +268,7 @@ pub const RoomService = struct {
         const room = self.rooms.getPtr(room_id) orelse return;
         tryRemovePlayer(self, room, user_id) catch {};
 
-        if (room.players.items.len == 0) {
-            removeRoomLocked(self, room_id);
-        }
+        cleanupRoomIfEmpty(self, .{ .room = room, .id = room_id });
     }
 };
 
@@ -371,6 +350,54 @@ fn normalizeRoomName(name: []const u8) Error![]const u8 {
 fn ensurePlayerLimit(limit: u8) Error!void {
     if (limit < 2 or limit > 8) {
         return Error.InvalidPlayerLimit;
+    }
+}
+
+const RoomAccess = struct {
+    room: *Room,
+    id: u32,
+};
+
+fn requireLoggedIn(user_id: ?i64) Error!i64 {
+    return user_id orelse Error.NotLoggedIn;
+}
+
+fn requireUsername(username: ?[]const u8) Error![]const u8 {
+    return username orelse Error.MissingUsername;
+}
+
+fn ensureUserNotInRoomLocked(self: *RoomService, uid: i64) Error!void {
+    if (self.user_to_room.contains(uid)) {
+        return Error.AlreadyInRoom;
+    }
+}
+
+fn getRoomByIdLocked(self: *RoomService, room_id: u32) Error!*Room {
+    return self.rooms.getPtr(room_id) orelse Error.RoomNotFound;
+}
+
+fn getRoomForUserLocked(self: *RoomService, uid: i64) Error!RoomAccess {
+    const room_id = self.user_to_room.get(uid) orelse return Error.NotInRoom;
+    const room = self.rooms.getPtr(room_id) orelse return Error.RoomNotFound;
+    return RoomAccess{ .room = room, .id = room_id };
+}
+
+fn ensureRoomJoinable(room: *Room) Error!void {
+    try ensureRoomWaiting(room);
+    if (room.players.items.len >= room.config.player_limit) {
+        return Error.RoomFull;
+    }
+}
+
+fn ensureRoomWaiting(room: *Room) Error!void {
+    if (room.state == .in_game) {
+        return Error.RoomInProgress;
+    }
+}
+
+fn cleanupRoomIfEmpty(self: *RoomService, access: RoomAccess) void {
+    if (access.room.players.items.len == 0) {
+        removeRoomLocked(self, access.id);
     }
 }
 
