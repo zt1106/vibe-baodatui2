@@ -1,6 +1,7 @@
-[gd_scene load_steps=14 format=3 uid="uid://ddkb8vwho5x6v"]
+[gd_scene load_steps=15 format=3 uid="uid://ddkb8vwho5x6v"]
 
 [ext_resource type="Script" uid="uid://bgtwxlyvh0vc6" path="res://scripts/home_page_controller.gd" id="1"]
+[ext_resource type="Texture2D" path="res://抱大腿.png" id="2"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_1"]
 bg_color = Color(0.15, 0.15, 0.15, 0.9)
@@ -220,20 +221,16 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
 
 [node name="Panel" type="Panel" parent="CenterContainer"]
-custom_minimum_size = Vector2(720, 520)
+custom_minimum_size = Vector2(900, 660)
 layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 4
 theme_override_styles/panel = SubResource("StyleBoxFlat_1")
 
 [node name="MarginContainer" type="MarginContainer" parent="CenterContainer/Panel"]
-layout_mode = 0
-offset_left = 20.0
-offset_top = 20.0
-offset_right = 700.0
-offset_bottom = 500.0
+layout_mode = 2
 theme_override_constants/margin_left = 40
 theme_override_constants/margin_top = 40
 theme_override_constants/margin_right = 40
@@ -242,6 +239,14 @@ theme_override_constants/margin_bottom = 40
 [node name="VBox" type="VBoxContainer" parent="CenterContainer/Panel/MarginContainer"]
 layout_mode = 2
 theme_override_constants/separation = 24
+
+[node name="LogoRow" type="CenterContainer" parent="CenterContainer/Panel/MarginContainer/VBox"]
+layout_mode = 2
+
+[node name="Logo" type="TextureRect" parent="CenterContainer/Panel/MarginContainer/VBox/LogoRow"]
+layout_mode = 2
+texture = ExtResource("2")
+stretch_mode = 5
 
 [node name="Title" type="Label" parent="CenterContainer/Panel/MarginContainer/VBox"]
 layout_mode = 2
@@ -372,11 +377,7 @@ layout_mode = 2
 size_flags_vertical = 3
 
 [node name="RoomPanelMargin" type="MarginContainer" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel"]
-layout_mode = 0
-offset_left = 16.0
-offset_top = 16.0
-offset_right = 1204.0
-offset_bottom = 496.0
+layout_mode = 2
 theme_override_constants/margin_left = 20
 theme_override_constants/margin_top = 20
 theme_override_constants/margin_right = 20

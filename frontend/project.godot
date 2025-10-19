@@ -18,6 +18,9 @@ display/window/size/viewport_width=1280
 display/window/size/viewport_height=720
 display/window/size/mode=2
 display/window/size/aspect="keep"
+display/window/content_scale/mode="canvas_items"
+display/window/content_scale/aspect="expand"
+display/window/content_scale/base_size=Vector2i(1280, 720)
 
 [rendering]
 

@@ -17,6 +17,7 @@ signal connection_failed
 
 var _error_dialog: AcceptDialog = null
 var _login_container: Control = null
+var _login_panel: Control = null
 var _lobby_container: Control = null
 var _nickname_input: LineEdit = null
 var _join_button: Button = null
@@ -92,6 +93,8 @@ func _enter_online_lobby() -> void:
 func _ready() -> void:
 	RandomNickname.init()
 	_cache_ui_nodes()
+	_update_login_panel_size()
+	get_viewport().size_changed.connect(_on_viewport_resized)
 	_show_login_view()
 	_attempt_connection()
 	_start_background_animation()
@@ -99,6 +102,7 @@ func _ready() -> void:
 func _cache_ui_nodes() -> void:
 	_error_dialog = get_node_or_null("ErrorDialog") as AcceptDialog
 	_login_container = get_node_or_null("CenterContainer") as Control
+	_login_panel = get_node_or_null("CenterContainer/Panel") as Control
 	_lobby_container = get_node_or_null("Lobby") as Control
 	_nickname_input = get_node_or_null("CenterContainer/Panel/MarginContainer/VBox/Form/NicknameInput") as LineEdit
 	_join_button = get_node_or_null("CenterContainer/Panel/MarginContainer/VBox/Form/JoinButton") as Button
@@ -154,6 +158,19 @@ func _cache_ui_nodes() -> void:
 		_create_room_button.pressed.connect(_on_create_room_pressed)
 	if _room_detail_label:
 		_room_detail_label.bbcode_text = "选择一个房间查看详情。"
+
+func _update_login_panel_size() -> void:
+	if not _login_panel:
+		return
+	var viewport_size := get_viewport().get_visible_rect().size
+	var target_width := viewport_size.x * 0.6
+	var target_height := viewport_size.y * 0.75
+	target_width = clamp(target_width, 900.0, 1600.0)
+	target_height = clamp(target_height, 660.0, 1100.0)
+	_login_panel.custom_minimum_size = Vector2(target_width, target_height)
+
+func _on_viewport_resized() -> void:
+	_update_login_panel_size()
 
 func _process(delta: float) -> void:
 	if _mock_mode:
