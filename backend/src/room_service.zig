@@ -5,8 +5,6 @@ pub const Error = error{
     NotLoggedIn,
     MissingUsername,
     AlreadyInRoom,
-    RoomNameExists,
-    InvalidRoomName,
     InvalidPlayerLimit,
     PlayerLimitTooLow,
     RoomNotFound,
@@ -33,7 +31,6 @@ pub const RoomListView = struct {
 pub const RoomService = struct {
     allocator: std.mem.Allocator,
     rooms: std.AutoHashMap(u32, Room),
-    rooms_by_name: std.StringHashMap(u32),
     user_to_room: std.AutoHashMap(i64, u32),
     next_room_id: u32 = 1,
     mutex: std.Thread.Mutex = .{},
@@ -42,7 +39,6 @@ pub const RoomService = struct {
         return .{
             .allocator = allocator,
             .rooms = std.AutoHashMap(u32, Room).init(allocator),
-            .rooms_by_name = std.StringHashMap(u32).init(allocator),
             .user_to_room = std.AutoHashMap(i64, u32).init(allocator),
         };
     }
@@ -53,7 +49,6 @@ pub const RoomService = struct {
             room.deinit(self.allocator);
         }
         self.rooms.deinit();
-        self.rooms_by_name.deinit();
         self.user_to_room.deinit();
     }
 
@@ -81,7 +76,6 @@ pub const RoomService = struct {
         while (vit.next()) |room| {
             buffer[index] = .{
                 .id = room.id,
-                .name = room.name,
                 .state = room.state,
                 .player_count = @intCast(room.players.items.len),
                 .player_limit = room.config.player_limit,
@@ -104,27 +98,18 @@ pub const RoomService = struct {
     ) (Error || std.mem.Allocator.Error)!messages.RoomDetailPayload {
         const uid = try requireLoggedIn(user_id);
         const uname = try requireUsername(username);
-
-        const trimmed_name = try normalizeRoomName(payload.name);
         try ensurePlayerLimit(payload.player_limit);
 
         self.mutex.lock();
         defer self.mutex.unlock();
 
         try ensureUserNotInRoomLocked(self, uid);
-        if (self.rooms_by_name.contains(trimmed_name)) {
-            return Error.RoomNameExists;
-        }
 
         const room_id = self.next_room_id;
         self.next_room_id += 1;
 
-        const name_copy = try self.allocator.dupe(u8, trimmed_name);
-        errdefer self.allocator.free(name_copy);
-
         var room = Room{
             .id = room_id,
-            .name = name_copy,
             .state = .waiting,
             .config = .{ .player_limit = payload.player_limit },
             .host_user_id = uid,
@@ -145,7 +130,6 @@ pub const RoomService = struct {
 
         try self.rooms.put(room.id, room);
         const stored_room = self.rooms.getPtr(room.id) orelse unreachable;
-        try self.rooms_by_name.put(stored_room.name, room.id);
         try self.user_to_room.put(uid, room.id);
 
         return snapshotRoom(stored_room);
@@ -304,7 +288,6 @@ const GameConfig = struct {
 
 const Room = struct {
     id: u32,
-    name: []u8,
     state: messages.RoomStatePayload,
     config: GameConfig,
     host_user_id: i64,
@@ -315,7 +298,6 @@ const Room = struct {
             allocator.free(@constCast(player.username));
         }
         self.players.deinit(allocator);
-        allocator.free(self.name);
     }
 
     fn playerIndex(self: *Room, user_id: i64) ?usize {
@@ -331,7 +313,6 @@ const Room = struct {
 fn snapshotRoom(room: *Room) messages.RoomDetailPayload {
     return .{
         .id = room.id,
-        .name = room.name,
         .state = room.state,
         .host_id = room.host_user_id,
         .config = .{ .player_limit = room.config.player_limit },
@@ -360,17 +341,7 @@ fn tryRemovePlayer(
 
 fn removeRoomLocked(self: *RoomService, room_id: u32) void {
     var removed = self.rooms.fetchRemove(room_id) orelse return;
-    const name_slice = removed.value.name;
-    _ = self.rooms_by_name.remove(name_slice);
     removed.value.deinit(self.allocator);
-}
-
-fn normalizeRoomName(name: []const u8) Error![]const u8 {
-    const trimmed = std.mem.trim(u8, name, " \t\r\n");
-    if (trimmed.len == 0) {
-        return Error.InvalidRoomName;
-    }
-    return trimmed;
 }
 
 fn ensurePlayerLimit(limit: u8) Error!void {
@@ -460,7 +431,6 @@ test "room service room lifecycle" {
 
     const uid: i64 = 1;
     var created = try service.createRoom(uid, "Alice", .{
-        .name = " Test Room ",
         .player_limit = 4,
     });
     try std.testing.expectEqual(@as(u32, 1), created.id);
@@ -498,7 +468,6 @@ test "room service reassigns host when original host leaves" {
 
     const host_id: i64 = 1;
     const detail = try service.createRoom(host_id, "Alice", .{
-        .name = "Reassign Test",
         .player_limit = 4,
     });
 
@@ -525,7 +494,6 @@ test "room service enforces config updates" {
 
     const host_id: i64 = 10;
     var detail = try service.createRoom(host_id, "Host", .{
-        .name = "Config Room",
         .player_limit = 5,
     });
 

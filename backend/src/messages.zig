@@ -465,7 +465,6 @@ pub const RoomPlayerStatePayload = enum {
 
 pub const RoomSummaryPayload = struct {
     id: u32,
-    name: []const u8,
     state: RoomStatePayload,
     player_count: u8,
     player_limit: u8,
@@ -484,7 +483,6 @@ pub const RoomConfigPayload = struct {
 
 pub const RoomDetailPayload = struct {
     id: u32,
-    name: []const u8,
     state: RoomStatePayload,
     host_id: i64,
     config: RoomConfigPayload,
@@ -498,7 +496,6 @@ pub const RoomListResponsePayload = struct {
 };
 
 pub const RoomCreatePayload = struct {
-    name: []const u8,
     player_limit: u8 = 4,
 };
 

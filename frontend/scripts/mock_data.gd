@@ -5,7 +5,6 @@ static func build_mock_rooms() -> Array:
 	return [
 		{
 			"id": 101,
-			"name": "休闲牌桌",
 			"state": "waiting",
 			"player_count": 2,
 			"player_limit": 6,
@@ -18,7 +17,6 @@ static func build_mock_rooms() -> Array:
 		},
 		{
 			"id": 202,
-			"name": "高额牌桌",
 			"state": "in_game",
 			"player_count": 4,
 			"player_limit": 6,
@@ -33,7 +31,6 @@ static func build_mock_rooms() -> Array:
 		},
 		{
 			"id": 303,
-			"name": "夜猫子牌桌",
 			"state": "waiting",
 			"player_count": 3,
 			"player_limit": 5,
@@ -46,4 +43,3 @@ static func build_mock_rooms() -> Array:
 			],
 		},
 	]
-

@@ -24,7 +24,6 @@ var _generate_nickname_button: Button = null
 var _refresh_rooms_button: Button = null
 var _join_room_button: Button = null
 var _room_list: ItemList = null
-var _room_name_input: LineEdit = null
 var _player_limit: SpinBox = null
 var _create_room_button: Button = null
 var _lobby_status_label: Label = null
@@ -111,7 +110,6 @@ func _cache_ui_nodes() -> void:
 	_room_list = get_node_or_null("Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox/RoomList") as ItemList
 	_join_room_button = get_node_or_null("Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox/RoomActions/JoinRoomButton") as Button
 	_room_detail_label = get_node_or_null("Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox/RoomDetailLabel") as RichTextLabel
-	_room_name_input = get_node_or_null("Lobby/MarginContainer/LobbyVBox/CreateRoomRow/RoomNameInput") as LineEdit
 	_player_limit = get_node_or_null("Lobby/MarginContainer/LobbyVBox/CreateRoomRow/PlayerLimit") as SpinBox
 	_create_room_button = get_node_or_null("Lobby/MarginContainer/LobbyVBox/CreateRoomRow/CreateRoomButton") as Button
 	_room_view_container = get_node_or_null("RoomView") as Control
@@ -474,8 +472,6 @@ func _enter_mock_lobby() -> void:
 		_refresh_rooms_button.disabled = true
 	if _create_room_button:
 		_create_room_button.disabled = true
-	if _room_name_input:
-		_room_name_input.editable = false
 	if _player_limit:
 		_player_limit.editable = false
 	_join_room_button_disabled(true)
@@ -585,11 +581,11 @@ func _update_room_list(payload: Variant) -> void:
 		if room_id_variant == null:
 			continue
 		var room_id := int(room_id_variant)
-		var room_name := str(room_entry.get("name", "房间 %d" % room_id))
+		var room_label := _format_room_label(room_id)
 		var player_count := int(room_entry.get("player_count", 0))
 		var player_limit := int(room_entry.get("player_limit", 0))
 		var state_text: String = LobbyUtils.format_room_state(str(room_entry.get("state", "")))
-		var label := "%s • %d/%d • %s" % [room_name, player_count, player_limit, state_text]
+		var label := "%s • %d/%d • %s" % [room_label, player_count, player_limit, state_text]
 		if _room_list:
 			var index := _room_list.add_item(label)
 			_room_list.set_item_metadata(index, room_entry.duplicate(true))
@@ -657,8 +653,9 @@ func _on_room_join_success(result: Variant) -> void:
 	_reset_room_view_controls()
 	_show_room_view()
 	_update_room_view(_current_room_detail)
-	var room_name := str(result.get("name", "房间"))
-	_set_room_view_status("已加入房间“%s”。" % room_name, false)
+	var room_id := int(result.get("id", -1))
+	var room_label := _format_room_label(room_id)
+	_set_room_view_status("已加入%s。" % room_label, false)
 	_set_lobby_status("", false)
 
 func _on_room_join_error(error_data: Dictionary) -> void:
@@ -675,13 +672,6 @@ func _on_create_room_pressed() -> void:
 		return
 	if _room_create_inflight:
 		return
-	if _room_name_input == null:
-		return
-	var room_name := _room_name_input.text.strip_edges()
-	if room_name.is_empty():
-		_set_lobby_status("请输入房间名称以创建。", true)
-		_room_name_input.grab_focus()
-		return
 	var limit := 4
 	if _player_limit:
 		limit = int(_player_limit.value)
@@ -691,7 +681,7 @@ func _on_create_room_pressed() -> void:
 	_set_lobby_status("正在创建房间...", false)
 	_send_request(
 		"room_create",
-		{"name": room_name, "player_limit": limit},
+		{"player_limit": limit},
 		Callable(self, "_on_room_create_success"),
 		Callable(self, "_on_room_create_error")
 	)
@@ -700,8 +690,6 @@ func _on_room_create_success(result: Variant) -> void:
 	_room_create_inflight = false
 	if _create_room_button:
 		_create_room_button.disabled = false
-	if _room_name_input:
-		_room_name_input.text = ""
 	if typeof(result) != TYPE_DICTIONARY:
 		_set_room_view_status("房间已创建。", false)
 		_show_room_view()
@@ -710,8 +698,9 @@ func _on_room_create_success(result: Variant) -> void:
 	_reset_room_view_controls()
 	_show_room_view()
 	_update_room_view(_current_room_detail)
-	var room_name := str(result.get("name", "房间"))
-	_set_room_view_status("已创建并成为“%s”的房主。" % room_name, false)
+	var room_id := int(result.get("id", -1))
+	var room_label := _format_room_label(room_id)
+	_set_room_view_status("已创建并成为%s的房主。" % room_label, false)
 	_set_lobby_status("", false)
 	_request_room_list()
 
@@ -862,12 +851,13 @@ func _render_room_summary(summary: Variant) -> void:
 	if typeof(summary) != TYPE_DICTIONARY:
 		_room_detail_label.bbcode_text = "选择一个房间查看详情。"
 		return
-	var room_name: String = LobbyUtils.escape_bbcode(str(summary.get("name", "房间")))
+	var room_id := int(summary.get("id", -1))
+	var room_label: String = LobbyUtils.escape_bbcode(_format_room_label(room_id))
 	var state: String = LobbyUtils.format_room_state(str(summary.get("state", "")))
 	var player_count := int(summary.get("player_count", 0))
 	var player_limit := int(summary.get("player_limit", 0))
 	var lines: Array[String] = []
-	lines.append("[b]%s[/b]" % room_name)
+	lines.append("[b]%s[/b]" % room_label)
 	lines.append("状态：%s" % state)
 	lines.append("玩家：%d/%d" % [player_count, player_limit])
 	_room_detail_label.bbcode_text = "\n".join(lines)
@@ -875,7 +865,8 @@ func _render_room_summary(summary: Variant) -> void:
 func _render_room_detail(detail: Variant) -> void:
 	if _room_detail_label == null or typeof(detail) != TYPE_DICTIONARY:
 		return
-	var room_name: String = LobbyUtils.escape_bbcode(str(detail.get("name", "房间")))
+	var room_id := int(detail.get("id", -1))
+	var room_label: String = LobbyUtils.escape_bbcode(_format_room_label(room_id))
 	var state: String = LobbyUtils.format_room_state(str(detail.get("state", "")))
 	var players: Array = detail.get("players", [])
 	var player_limit := players.size()
@@ -885,7 +876,7 @@ func _render_room_detail(detail: Variant) -> void:
 	else:
 		player_limit = int(detail.get("player_limit", player_limit))
 	var lines: Array[String] = []
-	lines.append("[b]%s[/b]" % room_name)
+	lines.append("[b]%s[/b]" % room_label)
 	lines.append("状态：%s" % state)
 	lines.append("玩家：%d/%d" % [players.size(), player_limit])
 	for player_data in players:
@@ -970,13 +961,19 @@ func _format_room_player_entry(entry: Dictionary) -> String:
 	var ready_state := LobbyUtils.format_player_state(str(entry.get("state", "")))
 	return "%s%s · %s" % [prefix, name, ready_state]
 
+func _format_room_label(room_id: int) -> String:
+	if room_id <= 0:
+		return "房间"
+	return "房间 %d" % room_id
+
 func _update_room_view(detail: Dictionary) -> void:
 	if _room_view_container == null:
 		return
 	if detail.is_empty():
 		_reset_room_view_controls()
 		return
-	var room_name := str(detail.get("name", "房间"))
+	var room_id := int(detail.get("id", -1))
+	var room_label := _format_room_label(room_id)
 	var state: String = LobbyUtils.format_room_state(str(detail.get("state", "")))
 	var players: Array = detail.get("players", [])
 	var limit := players.size()
@@ -987,7 +984,7 @@ func _update_room_view(detail: Dictionary) -> void:
 		limit = int(detail.get("player_limit", limit))
 	_current_room_config_limit = limit
 	if _room_view_title_label:
-		_room_view_title_label.text = "房间：%s" % room_name
+		_room_view_title_label.text = room_label
 	if _room_view_state_label:
 		_room_view_state_label.text = "状态：%s    玩家：%d/%d" % [state, players.size(), limit]
 	if _room_view_players_list:

@@ -13,7 +13,6 @@ test "integration: room lobby flow" {
             const host_id = host_payload.id;
 
             const created_payload = try host.request(allocator, 2000, "room_create", messages.RoomCreatePayload{
-                .name = "Integration Room",
                 .player_limit = 4,
             }, messages.RoomDetailPayload);
             const room_id = created_payload.id;

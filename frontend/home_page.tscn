@@ -417,12 +417,6 @@ scroll_active = false
 layout_mode = 2
 theme_override_constants/separation = 16
 
-[node name="RoomNameInput" type="LineEdit" parent="Lobby/MarginContainer/LobbyVBox/CreateRoomRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 18
-placeholder_text = "房间名称"
-
 [node name="PlayerLimit" type="SpinBox" parent="Lobby/MarginContainer/LobbyVBox/CreateRoomRow"]
 layout_mode = 2
 min_value = 2.0
