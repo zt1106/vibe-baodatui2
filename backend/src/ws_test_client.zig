@@ -17,13 +17,72 @@ pub const ClientError = error{
 pub const IntegrationContext = struct {
     allocator: std.mem.Allocator,
     server: test_support.GameServerFixture,
+    client_config: TestClient.Config,
     client: TestClient,
+    extra_clients: std.ArrayList(*TestClient),
 
     fn deinit(self: *IntegrationContext) void {
         self.client.close();
         self.client.deinit();
+
+        for (self.extra_clients.items) |client_ptr| {
+            client_ptr.close();
+            client_ptr.deinit();
+            self.allocator.destroy(client_ptr);
+        }
+        self.extra_clients.deinit(self.allocator);
+
         self.server.shutdown();
         self.* = undefined;
+    }
+
+    pub fn port(self: *IntegrationContext) u16 {
+        return self.client_config.port;
+    }
+
+    pub fn primaryClient(self: *IntegrationContext) *TestClient {
+        return &self.client;
+    }
+
+    pub fn connectClient(self: *IntegrationContext, maybe_config: ?TestClient.Config) !*TestClient {
+        const config = maybe_config orelse self.client_config;
+        return self.createClientInternal(config, null);
+    }
+
+    pub fn connectReadyClient(self: *IntegrationContext, timeout_ms: u32, maybe_config: ?TestClient.Config) !*TestClient {
+        const config = maybe_config orelse self.client_config;
+        return self.createClientInternal(config, timeout_ms);
+    }
+
+    pub fn extraClients(self: *IntegrationContext) []const *TestClient {
+        return self.extra_clients.items;
+    }
+
+    fn createClientInternal(self: *IntegrationContext, config: TestClient.Config, timeout_ms: ?u32) !*TestClient {
+        var client = try TestClient.connect(self.allocator, config);
+        var cleanup_client = true;
+        defer if (cleanup_client) {
+            client.close();
+            client.deinit();
+        };
+
+        if (timeout_ms) |ms| {
+            try expectConnected(&client, self.allocator, ms);
+        }
+
+        const client_ptr = try self.allocator.create(TestClient);
+        errdefer self.allocator.destroy(client_ptr);
+
+        client_ptr.* = client;
+        cleanup_client = false;
+
+        errdefer {
+            client_ptr.close();
+            client_ptr.deinit();
+        }
+
+        try self.extra_clients.append(self.allocator, client_ptr);
+        return client_ptr;
     }
 };
 
@@ -39,21 +98,28 @@ fn setupServerAndClient(allocator: std.mem.Allocator, port: u16) !IntegrationCon
         server_fixture.shutdown();
     }
 
-    var client = try TestClient.connect(allocator, .{
+    const base_config = TestClient.Config{
         .host = "127.0.0.1",
         .port = port,
         .path = "/",
         .handshake_timeout_ms = 2000,
-    });
+    };
+
+    var client = try TestClient.connect(allocator, base_config);
     errdefer {
         client.close();
         client.deinit();
     }
 
+    var extra_clients = std.ArrayList(*TestClient).empty;
+    errdefer extra_clients.deinit(allocator);
+
     return IntegrationContext{
         .allocator = allocator,
         .server = server_fixture,
+        .client_config = base_config,
         .client = client,
+        .extra_clients = extra_clients,
     };
 }
 
@@ -89,13 +155,18 @@ pub fn setupReadyClient(allocator: std.mem.Allocator, port: u16) !IntegrationCon
     var ctx = try setupServerAndClient(allocator, port);
     errdefer ctx.deinit();
 
-    var welcome = try ctx.client.expectCall(allocator, 2000, "system");
+    try expectConnected(&ctx.client, allocator, 2000);
+
+    return ctx;
+}
+
+fn expectConnected(client: *TestClient, allocator: std.mem.Allocator, timeout_ms: u32) !void {
+    var welcome = try client.expectCall(allocator, timeout_ms, "system");
     defer welcome.deinit();
+
     const welcome_call = try welcome.call();
     const welcome_payload = try welcome_call.paramsAs(messages.SystemPayload);
     try std.testing.expectEqualStrings("connected", welcome_payload.code);
-
-    return ctx;
 }
 
 pub const TestClient = struct {
