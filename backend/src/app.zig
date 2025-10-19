@@ -275,6 +275,12 @@ pub const GameApp = struct {
         log.info("WebSocket ->\n{s}", .{pretty});
     }
 
+    fn sendFrame(self: *GameApp, conn: *ws.Conn, frame: []const u8) !void {
+        defer self.allocator.free(frame);
+        self.logOutbound(frame);
+        try conn.write(frame);
+    }
+
     fn sendNotification(
         self: *GameApp,
         conn: *ws.Conn,
@@ -282,9 +288,7 @@ pub const GameApp = struct {
         params: anytype,
     ) !void {
         const frame = try messages.encodeNotification(self.allocator, method, params);
-        defer self.allocator.free(frame);
-        self.logOutbound(frame);
-        try conn.write(frame);
+        try self.sendFrame(conn, frame);
     }
 
     fn sendResponse(
@@ -294,9 +298,7 @@ pub const GameApp = struct {
         result: anytype,
     ) !void {
         const frame = try messages.encodeResponse(self.allocator, id, result);
-        defer self.allocator.free(frame);
-        self.logOutbound(frame);
-        try conn.write(frame);
+        try self.sendFrame(conn, frame);
     }
 
     fn sendResponseNull(
@@ -305,9 +307,7 @@ pub const GameApp = struct {
         id: messages.Id,
     ) !void {
         const frame = try messages.encodeResponseNull(self.allocator, id);
-        defer self.allocator.free(frame);
-        self.logOutbound(frame);
-        try conn.write(frame);
+        try self.sendFrame(conn, frame);
     }
 
     fn sendError(
@@ -318,9 +318,7 @@ pub const GameApp = struct {
         message: []const u8,
     ) !void {
         const frame = try messages.encodeError(self.allocator, id, code, message);
-        defer self.allocator.free(frame);
-        self.logOutbound(frame);
-        try conn.write(frame);
+        try self.sendFrame(conn, frame);
     }
 };
 
