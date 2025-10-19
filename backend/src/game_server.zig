@@ -4,6 +4,7 @@ const ws = @import("websocket");
 const messages = @import("messages.zig");
 const app = @import("app.zig");
 const ws_test_client = @import("ws_test_client.zig");
+const test_support = @import("test_support.zig");
 
 const log = std.log.scoped(.game_server);
 
@@ -152,29 +153,13 @@ const Handler = struct {
     }
 };
 
-fn withTempDir(action: anytype) !void {
-    var original_dir = try std.fs.cwd().openDir(".", .{});
-    defer original_dir.close();
-
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
-
-    try tmp_dir.dir.setAsCwd();
-    defer original_dir.setAsCwd() catch {};
-
-    try action();
-}
-
 test "game_server sends welcome message on connect" {
-    try withTempDir(struct {
+    try test_support.withTempDir(struct {
         fn run() !void {
             const allocator = std.testing.allocator;
 
-            var game_app = try app.GameApp.init(allocator);
-            defer game_app.deinit();
-
             const port: u16 = 21001;
-            var server = try start(&game_app, allocator, .{
+            var fixture = try test_support.spawnServer(allocator, .{
                 .address = "127.0.0.1",
                 .port = port,
                 .handshake_timeout = 5,
@@ -182,8 +167,7 @@ test "game_server sends welcome message on connect" {
                 .thread_pool_count = 1,
             });
             defer {
-                server.stop();
-                server.deinit();
+                fixture.shutdown();
             }
 
             var client = try ws_test_client.TestClient.connect(allocator, .{
@@ -209,15 +193,12 @@ test "game_server sends welcome message on connect" {
 }
 
 test "game_server returns system error for unknown message" {
-    try withTempDir(struct {
+    try test_support.withTempDir(struct {
         fn run() !void {
             const allocator = std.testing.allocator;
 
-            var game_app = try app.GameApp.init(allocator);
-            defer game_app.deinit();
-
             const port: u16 = 21002;
-            var server = try start(&game_app, allocator, .{
+            var fixture = try test_support.spawnServer(allocator, .{
                 .address = "127.0.0.1",
                 .port = port,
                 .handshake_timeout = 5,
@@ -225,8 +206,7 @@ test "game_server returns system error for unknown message" {
                 .thread_pool_count = 1,
             });
             defer {
-                server.stop();
-                server.deinit();
+                fixture.shutdown();
             }
 
             var client = try ws_test_client.TestClient.connect(allocator, .{

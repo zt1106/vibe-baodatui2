@@ -2,8 +2,8 @@ const std = @import("std");
 const websocket = @import("websocket");
 
 const messages = @import("messages.zig");
-const app = @import("app.zig");
 const game_server = @import("game_server.zig");
+const test_support = @import("test_support.zig");
 
 const ws_client = websocket.Client;
 
@@ -25,33 +25,19 @@ test "ws_test_client connects and handles ping" {
 
 pub const IntegrationContext = struct {
     allocator: std.mem.Allocator,
-    game_app: *app.GameApp,
-    server: game_server.Instance,
+    server: test_support.GameServerFixture,
     client: TestClient,
 
     fn deinit(self: *IntegrationContext) void {
         self.client.close();
         self.client.deinit();
-        self.server.stop(); // This already calls thread.join()
-        self.server.deinit();
-        self.game_app.deinit();
-        self.allocator.destroy(self.game_app);
+        self.server.shutdown();
         self.* = undefined;
     }
 };
 
 fn setupServerAndClient(allocator: std.mem.Allocator, port: u16) !IntegrationContext {
-    // Use the same allocator for everything since it's already thread-safe
-    const app_allocator = allocator;
-    const server_allocator = allocator;
-
-    const game_app = try app_allocator.create(app.GameApp);
-    errdefer app_allocator.destroy(game_app);
-
-    game_app.* = try app.GameApp.init(app_allocator);
-    errdefer game_app.deinit();
-
-    var server = try game_server.start(game_app, server_allocator, .{
+    var server_fixture = try test_support.spawnServer(allocator, .{
         .address = "127.0.0.1",
         .port = port,
         .handshake_timeout = 5,
@@ -59,8 +45,7 @@ fn setupServerAndClient(allocator: std.mem.Allocator, port: u16) !IntegrationCon
         .thread_pool_count = 1,
     });
     errdefer {
-        server.stop();
-        server.deinit();
+        server_fixture.shutdown();
     }
 
     var client = try TestClient.connect(allocator, .{
@@ -76,32 +61,37 @@ fn setupServerAndClient(allocator: std.mem.Allocator, port: u16) !IntegrationCon
 
     return IntegrationContext{
         .allocator = allocator,
-        .game_app = game_app,
-        .server = server,
+        .server = server_fixture,
         .client = client,
     };
 }
 
 pub fn withReadyClient(port: u16, callback: anytype) !void {
-    var original_dir = try std.fs.cwd().openDir(".", .{});
-    defer original_dir.close();
+    const CallbackFn = *const fn (*IntegrationContext) anyerror!void;
+    const cb: CallbackFn = callback;
 
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
+    const Runner = struct {
+        port: u16,
+        callback: CallbackFn,
 
-    try tmp_dir.dir.setAsCwd();
-    defer original_dir.setAsCwd() catch {};
+        fn run(self: *@This()) !void {
+            var gpa = std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }){};
+            defer _ = gpa.deinit();
+            const allocator = gpa.allocator();
 
-    // Use a thread-safe allocator for the test
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+            var ctx = try setupReadyClient(allocator, self.port);
+            defer ctx.deinit();
 
-    var ctx = try setupReadyClient(allocator, port);
-    errdefer ctx.deinit();
+            try self.callback(&ctx);
+        }
+    };
 
-    try callback(&ctx);
-    ctx.deinit();
+    var runner = Runner{
+        .port = port,
+        .callback = cb,
+    };
+
+    try test_support.withTempDirContext(@TypeOf(runner), Runner.run, &runner);
 }
 
 pub fn setupReadyClient(allocator: std.mem.Allocator, port: u16) !IntegrationContext {
