@@ -374,10 +374,13 @@ autowrap_mode = 2
 
 [node name="RoomPanel" type="Panel" parent="Lobby/MarginContainer/LobbyVBox"]
 layout_mode = 2
+size_flags_horizontal = 3
 size_flags_vertical = 3
 
 [node name="RoomPanelMargin" type="MarginContainer" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel"]
 layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
 theme_override_constants/margin_left = 20
 theme_override_constants/margin_top = 20
 theme_override_constants/margin_right = 20
@@ -385,6 +388,8 @@ theme_override_constants/margin_bottom = 20
 
 [node name="RoomPanelVBox" type="VBoxContainer" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin"]
 layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
 theme_override_constants/separation = 16
 
 [node name="RoomListLabel" type="Label" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox"]
@@ -394,22 +399,27 @@ text = "可用房间"
 
 [node name="RoomList" type="ItemList" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox"]
 layout_mode = 2
+size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_font_sizes/font_size = 18
 select_mode = 1
+custom_minimum_size = Vector2(0, 260)
 
 [node name="RoomActions" type="HBoxContainer" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox"]
 layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 16
 
 [node name="JoinRoomButton" type="Button" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox/RoomActions"]
 layout_mode = 2
+size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 18
 disabled = true
 text = "加入所选房间"
 
 [node name="RoomDetailLabel" type="RichTextLabel" parent="Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox"]
 layout_mode = 2
+size_flags_horizontal = 3
 theme_override_font_sizes/normal_font_size = 16
 bbcode_enabled = true
 scroll_active = false
