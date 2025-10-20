@@ -3,6 +3,7 @@ extends Node
 const LobbyUtils = preload("res://scripts/lobby_utils.gd")
 const RandomNickname = preload("res://scripts/random_nickname.gd")
 const MockData = preload("res://scripts/mock_data.gd")
+const RoomViewController = preload("res://scripts/room_view_controller.gd")
 
 @export var websocket_url: String = "ws://127.0.0.1:7998/"
 @export var timeout_seconds: float = 3.0
@@ -29,18 +30,8 @@ var _player_limit: SpinBox = null
 var _create_room_button: Button = null
 var _lobby_status_label: Label = null
 var _user_info_label: Label = null
-var _room_detail_label: RichTextLabel = null
 var _mock_lobby_button: Button = null
-var _room_view_container: Control = null
-var _room_view_title_label: Label = null
-var _room_view_state_label: Label = null
-var _room_view_status_label: Label = null
-var _room_view_players_list: ItemList = null
-var _room_view_ready_button: Button = null
-var _room_view_leave_button: Button = null
-var _room_view_config_limit: SpinBox = null
-var _room_view_config_apply_button: Button = null
-var _room_view_config_hint: Label = null
+var _room_view: RoomViewController = null
 var _poker_chips: Array[ColorRect] = []
 var _animation_time: float = 0.0
 
@@ -48,8 +39,6 @@ var _animation_time: float = 0.0
 var _request_id_seq: int = 0
 var _pending_requests: Dictionary = {}
 var _rooms: Dictionary = {}
-var _current_room_detail: Dictionary = {}
-var _current_room_config_limit: int = 0
 var _user_id: int = -1
 var _username: String = ""
 var _room_list_inflight: bool = false
@@ -58,8 +47,6 @@ var _room_create_inflight: bool = false
 var _room_leave_inflight: bool = false
 var _room_ready_inflight: bool = false
 var _room_config_inflight: bool = false
-var _room_config_dirty: bool = false
-var _suppress_config_signal: bool = false
 var _mock_mode: bool = false
 
 
@@ -80,6 +67,16 @@ func _pending_key(value: Variant) -> String:
 			return str(value)
 		_:
 			return str(value)
+
+
+func _room_view_context() -> Dictionary:
+	return {
+		"user_id": _user_id,
+		"mock_mode": _mock_mode,
+		"room_ready_inflight": _room_ready_inflight,
+		"room_leave_inflight": _room_leave_inflight,
+		"room_config_inflight": _room_config_inflight
+	}
 
 func _enter_online_lobby() -> void:
 	_mock_mode = false
@@ -113,19 +110,37 @@ func _cache_ui_nodes() -> void:
 	_lobby_status_label = get_node_or_null("Lobby/MarginContainer/LobbyVBox/LobbyStatusLabel") as Label
 	_room_list = get_node_or_null("Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox/RoomList") as ItemList
 	_join_room_button = get_node_or_null("Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox/RoomActions/JoinRoomButton") as Button
-	_room_detail_label = get_node_or_null("Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox/RoomDetailLabel") as RichTextLabel
+	var room_detail_label := get_node_or_null("Lobby/MarginContainer/LobbyVBox/RoomPanel/RoomPanelMargin/RoomPanelVBox/RoomDetailLabel") as RichTextLabel
 	_player_limit = get_node_or_null("Lobby/MarginContainer/LobbyVBox/CreateRoomRow/PlayerLimit") as SpinBox
 	_create_room_button = get_node_or_null("Lobby/MarginContainer/LobbyVBox/CreateRoomRow/CreateRoomButton") as Button
-	_room_view_container = get_node_or_null("RoomView") as Control
-	_room_view_title_label = get_node_or_null("RoomView/MarginContainer/RoomVBox/RoomTitle") as Label
-	_room_view_state_label = get_node_or_null("RoomView/MarginContainer/RoomVBox/RoomStateLabel") as Label
-	_room_view_status_label = get_node_or_null("RoomView/MarginContainer/RoomVBox/RoomStatusLabel") as Label
-	_room_view_players_list = get_node_or_null("RoomView/MarginContainer/RoomVBox/ContentRow/PlayersColumn/PlayersList") as ItemList
-	_room_view_ready_button = get_node_or_null("RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/ReadyButton") as Button
-	_room_view_leave_button = get_node_or_null("RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/LeaveButton") as Button
-	_room_view_config_limit = get_node_or_null("RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/ConfigPanel/PlayerLimitSpin") as SpinBox
-	_room_view_config_apply_button = get_node_or_null("RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/ConfigPanel/ApplyConfigButton") as Button
-	_room_view_config_hint = get_node_or_null("RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/ConfigPanel/ConfigHint") as Label
+	var room_view_container := get_node_or_null("RoomView") as Control
+	var room_view_title_label := get_node_or_null("RoomView/MarginContainer/RoomVBox/RoomTitle") as Label
+	var room_view_state_label := get_node_or_null("RoomView/MarginContainer/RoomVBox/RoomStateLabel") as Label
+	var room_view_status_label := get_node_or_null("RoomView/MarginContainer/RoomVBox/RoomStatusLabel") as Label
+	var room_view_players_list := get_node_or_null("RoomView/MarginContainer/RoomVBox/ContentRow/PlayersColumn/PlayersList") as ItemList
+	var room_view_ready_button := get_node_or_null("RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/ReadyButton") as Button
+	var room_view_leave_button := get_node_or_null("RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/LeaveButton") as Button
+	var room_view_config_limit := get_node_or_null("RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/ConfigPanel/PlayerLimitSpin") as SpinBox
+	var room_view_config_apply_button := get_node_or_null("RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/ConfigPanel/ApplyConfigButton") as Button
+	var room_view_config_hint := get_node_or_null("RoomView/MarginContainer/RoomVBox/ContentRow/ActionsColumn/ConfigPanel/ConfigHint") as Label
+
+	_room_view = RoomViewController.new()
+	_room_view.setup({
+		"detail_label": room_detail_label,
+		"container": room_view_container,
+		"title_label": room_view_title_label,
+		"state_label": room_view_state_label,
+		"status_label": room_view_status_label,
+		"players_list": room_view_players_list,
+		"ready_button": room_view_ready_button,
+		"leave_button": room_view_leave_button,
+		"config_limit": room_view_config_limit,
+		"config_apply_button": room_view_config_apply_button,
+		"config_hint_label": room_view_config_hint
+	})
+	_room_view.ready_pressed.connect(_on_ready_button_pressed)
+	_room_view.leave_pressed.connect(_on_leave_room_pressed)
+	_room_view.config_apply_pressed.connect(_on_room_config_apply_pressed)
 
 	# Cache poker chip nodes for animation
 	_poker_chips.append(get_node_or_null("PokerChip1") as ColorRect)
@@ -156,8 +171,8 @@ func _cache_ui_nodes() -> void:
 		_join_room_button.pressed.connect(_on_join_room_pressed)
 	if _create_room_button:
 		_create_room_button.pressed.connect(_on_create_room_pressed)
-	if _room_detail_label:
-		_room_detail_label.bbcode_text = "选择一个房间查看详情。"
+	if _room_view:
+		_room_view.reset_summary()
 
 func _update_login_panel_size() -> void:
 	if not _login_panel:
@@ -444,7 +459,8 @@ func _enter_mock_lobby() -> void:
 	_elapsed = 0.0
 	_pending_requests.clear()
 	_rooms.clear()
-	_current_room_detail.clear()
+	if _room_view:
+		_room_view.clear_room_detail()
 	_request_id_seq = 0
 	_room_list_inflight = false
 	_room_join_inflight = false
@@ -452,7 +468,6 @@ func _enter_mock_lobby() -> void:
 	_room_leave_inflight = false
 	_room_ready_inflight = false
 	_room_config_inflight = false
-	_room_config_dirty = false
 	var state := _client.get_ready_state()
 	if state == WebSocketPeer.STATE_CONNECTING or state == WebSocketPeer.STATE_OPEN or state == WebSocketPeer.STATE_CLOSING:
 		_client.close()
@@ -479,9 +494,9 @@ func _enter_mock_lobby() -> void:
 		_room_list.select(0)
 		var metadata: Variant = _room_list.get_item_metadata(0)
 		if typeof(metadata) == TYPE_DICTIONARY:
-			_render_room_summary(metadata)
+			_room_view.render_summary(metadata)
 			if metadata.has("players"):
-				_render_room_detail(metadata)
+				_room_view.render_detail(metadata)
 	_set_lobby_status("离线预览：服务器操作已禁用。", false)
 	_reset_room_view_controls()
 	_hide_room_view()
@@ -492,19 +507,6 @@ func _enter_mock_lobby() -> void:
 	if _player_limit:
 		_player_limit.editable = false
 	_join_room_button_disabled(true)
-
-	if _room_view_ready_button:
-		_room_view_ready_button.disabled = true
-		_room_view_ready_button.pressed.connect(_on_ready_button_pressed)
-	if _room_view_leave_button:
-		_room_view_leave_button.disabled = true
-		_room_view_leave_button.pressed.connect(_on_leave_room_pressed)
-	if _room_view_config_apply_button:
-		_room_view_config_apply_button.disabled = true
-		_room_view_config_apply_button.pressed.connect(_on_room_config_apply_pressed)
-	if _room_view_config_limit:
-		_room_view_config_limit.editable = false
-		_room_view_config_limit.value_changed.connect(_on_room_config_limit_changed)
 
 
 func _on_user_set_name_success(result: Variant) -> void:
@@ -579,8 +581,8 @@ func _update_room_list(payload: Variant) -> void:
 		_room_list.clear()
 	_join_room_button_disabled(true)
 	_rooms.clear()
-	if _room_detail_label:
-		_room_detail_label.bbcode_text = "选择一个房间查看详情。"
+	if _room_view:
+		_room_view.reset_summary()
 	if typeof(payload) != TYPE_DICTIONARY:
 		_set_lobby_status("房间列表数据异常。", true)
 		return
@@ -620,10 +622,10 @@ func _on_room_selected(index: int) -> void:
 		_join_room_button_disabled(true)
 	else:
 		_join_room_button_disabled(false)
-	if typeof(metadata) == TYPE_DICTIONARY:
-		_render_room_summary(metadata)
+	if typeof(metadata) == TYPE_DICTIONARY and _room_view:
+		_room_view.render_summary(metadata)
 		if metadata.has("players"):
-			_render_room_detail(metadata)
+			_room_view.render_detail(metadata)
 
 func _on_room_activated(index: int) -> void:
 	_on_room_selected(index)
@@ -666,10 +668,10 @@ func _on_room_join_success(result: Variant) -> void:
 		_show_room_view()
 		_set_room_view_status("已加入房间。", false)
 		return
-	_current_room_detail = result.duplicate(true)
 	_reset_room_view_controls()
 	_show_room_view()
-	_update_room_view(_current_room_detail)
+	if _room_view:
+		_room_view.update_room_view(result, _room_view_context())
 	var room_id := int(result.get("id", -1))
 	var room_label := _format_room_label(room_id)
 	_set_room_view_status("已加入%s。" % room_label, false)
@@ -711,10 +713,10 @@ func _on_room_create_success(result: Variant) -> void:
 		_set_room_view_status("房间已创建。", false)
 		_show_room_view()
 		return
-	_current_room_detail = result.duplicate(true)
 	_reset_room_view_controls()
 	_show_room_view()
-	_update_room_view(_current_room_detail)
+	if _room_view:
+		_room_view.update_room_view(result, _room_view_context())
 	var room_id := int(result.get("id", -1))
 	var room_label := _format_room_label(room_id)
 	_set_room_view_status("已创建并成为%s的房主。" % room_label, false)
@@ -733,18 +735,18 @@ func _on_room_create_error(error_data: Dictionary) -> void:
 func _on_ready_button_pressed() -> void:
 	if _mock_mode or _room_ready_inflight:
 		return
-	if _current_room_detail.is_empty():
+	if _room_view == null or !_room_view.has_room_detail():
 		_set_room_view_status("尚未加入房间。", true)
 		return
-	var current_entry := _get_current_player_entry(_current_room_detail)
+	var current_entry := _room_view.current_player_entry(_user_id)
 	if current_entry.is_empty():
 		_set_room_view_status("未找到玩家信息。", true)
 		return
 	var current_state := str(current_entry.get("state", "not_prepared"))
 	var target_prepared := current_state != "prepared"
 	_room_ready_inflight = true
-	if _room_view_ready_button:
-		_room_view_ready_button.disabled = true
+	if _room_view:
+		_room_view.set_ready_button_disabled(true)
 	_set_room_view_status("正在更新准备状态...", false)
 	_send_request(
 		"room_ready",
@@ -756,15 +758,16 @@ func _on_ready_button_pressed() -> void:
 func _on_room_ready_success(result: Variant) -> void:
 	_room_ready_inflight = false
 	if typeof(result) == TYPE_DICTIONARY:
-		_current_room_detail = result.duplicate(true)
-		_update_room_view(_current_room_detail)
-		var entry := _get_current_player_entry(_current_room_detail)
+		if _room_view:
+			_room_view.update_room_view(result, _room_view_context())
+		var entry := _room_view.current_player_entry(_user_id) if _room_view else {}
 		var prepared := str(entry.get("state", "not_prepared")) == "prepared"
 		var status_message := "你已准备就绪。" if prepared else "已取消准备状态。"
 		_set_room_view_status(status_message, false)
 	else:
 		_set_room_view_status("准备状态已更新。", false)
-	_update_room_view(_current_room_detail)
+	if _room_view:
+		_room_view.refresh_room_view(_room_view_context())
 
 func _on_room_ready_error(error_data: Dictionary) -> void:
 	_room_ready_inflight = false
@@ -772,7 +775,8 @@ func _on_room_ready_error(error_data: Dictionary) -> void:
 	if typeof(error_data) == TYPE_DICTIONARY and error_data.has("message"):
 		message = str(error_data["message"])
 	_set_room_view_status(message, true)
-	_update_room_view(_current_room_detail)
+	if _room_view:
+		_room_view.refresh_room_view(_room_view_context())
 
 func _on_leave_room_pressed() -> void:
 	if _mock_mode:
@@ -781,8 +785,8 @@ func _on_leave_room_pressed() -> void:
 	if _room_leave_inflight:
 		return
 	_room_leave_inflight = true
-	if _room_view_leave_button:
-		_room_view_leave_button.disabled = true
+	if _room_view:
+		_room_view.set_leave_button_disabled(true)
 	_set_room_view_status("正在离开房间...", false)
 	_send_request(
 		"room_leave",
@@ -792,9 +796,10 @@ func _on_leave_room_pressed() -> void:
 	)
 
 func _clear_room_state() -> void:
-	_current_room_detail.clear()
-	_current_room_config_limit = 0
-	_room_config_dirty = false
+	if _room_view:
+		_room_view.clear_room_detail()
+		_room_view.set_config_inflight(false)
+	_room_config_inflight = false
 
 func _on_room_leave_success(_result: Variant) -> void:
 	_room_leave_inflight = false
@@ -811,31 +816,26 @@ func _on_room_leave_error(error_data: Dictionary) -> void:
 	if typeof(error_data) == TYPE_DICTIONARY and error_data.has("message"):
 		message = str(error_data["message"])
 	_set_room_view_status(message, true)
-	_update_room_view(_current_room_detail)
-
-func _on_room_config_limit_changed(value: float) -> void:
-	if _suppress_config_signal:
-		return
-	var new_limit := int(value)
-	_room_config_dirty = new_limit != _current_room_config_limit
-	if _room_view_config_apply_button:
-		var can_apply := _room_config_dirty and !_room_config_inflight and _is_current_user_host(_current_room_detail) and !_mock_mode
-		_room_view_config_apply_button.disabled = !can_apply
+	if _room_view:
+		_room_view.refresh_room_view(_room_view_context())
 
 func _on_room_config_apply_pressed() -> void:
 	if _mock_mode:
 		_set_room_view_status("离线预览：无法更新配置。", true)
 		return
-	if _room_config_inflight or !_room_view_config_limit:
+	if _room_config_inflight or _room_view == null:
 		return
-	var new_limit := int(_room_view_config_limit.value)
-	if !_room_config_dirty or new_limit == _current_room_config_limit:
+	if !_room_view.has_room_detail():
+		_set_room_view_status("尚未加入房间。", true)
+		return
+	if !_room_view.has_config_dirty():
 		_set_room_view_status("没有需要保存的更改。", false)
 		return
 	_room_config_inflight = true
-	_room_config_dirty = false
-	if _room_view_config_apply_button:
-		_room_view_config_apply_button.disabled = true
+	var new_limit := _room_view.get_config_limit_value()
+	_room_view.set_config_dirty(false)
+	_room_view.set_config_apply_disabled(true)
+	_room_view.set_config_inflight(true)
 	_set_room_view_status("正在更新房间配置...", false)
 	_send_request(
 		"room_config_update",
@@ -846,203 +846,52 @@ func _on_room_config_apply_pressed() -> void:
 
 func _on_room_config_update_success(result: Variant) -> void:
 	_room_config_inflight = false
-	if typeof(result) == TYPE_DICTIONARY:
-		_current_room_detail = result.duplicate(true)
-		_update_room_view(_current_room_detail)
-		_set_room_view_status("房间配置已更新。", false)
-	else:
-		_set_room_view_status("房间配置已更新。", false)
-	_update_room_view(_current_room_detail)
+	if _room_view:
+		_room_view.set_config_inflight(false)
+	if typeof(result) == TYPE_DICTIONARY and _room_view:
+		_room_view.update_room_view(result, _room_view_context())
+	_set_room_view_status("房间配置已更新。", false)
+	if _room_view:
+		_room_view.refresh_room_view(_room_view_context())
 
 func _on_room_config_update_error(error_data: Dictionary) -> void:
 	_room_config_inflight = false
+	if _room_view:
+		_room_view.set_config_inflight(false)
 	var message := "无法更新房间配置。"
 	if typeof(error_data) == TYPE_DICTIONARY and error_data.has("message"):
 		message = str(error_data["message"])
 	_set_room_view_status(message, true)
-	_update_room_view(_current_room_detail)
-
-func _render_room_summary(summary: Variant) -> void:
-	if _room_detail_label == null:
-		return
-	if typeof(summary) != TYPE_DICTIONARY:
-		_room_detail_label.bbcode_text = "选择一个房间查看详情。"
-		return
-	var room_id := int(summary.get("id", -1))
-	var room_label: String = LobbyUtils.escape_bbcode(_format_room_label(room_id))
-	var state: String = LobbyUtils.format_room_state(str(summary.get("state", "")))
-	var player_count := int(summary.get("player_count", 0))
-	var player_limit := int(summary.get("player_limit", 0))
-	var lines: Array[String] = []
-	lines.append("[b]%s[/b]" % room_label)
-	lines.append("状态：%s" % state)
-	lines.append("玩家：%d/%d" % [player_count, player_limit])
-	_room_detail_label.bbcode_text = "\n".join(lines)
-
-func _render_room_detail(detail: Variant) -> void:
-	if _room_detail_label == null or typeof(detail) != TYPE_DICTIONARY:
-		return
-	var room_id := int(detail.get("id", -1))
-	var room_label: String = LobbyUtils.escape_bbcode(_format_room_label(room_id))
-	var state: String = LobbyUtils.format_room_state(str(detail.get("state", "")))
-	var players: Array = detail.get("players", [])
-	var player_limit := players.size()
-	var config: Variant = detail.get("config", null)
-	if typeof(config) == TYPE_DICTIONARY:
-		player_limit = int(config.get("player_limit", player_limit))
-	else:
-		player_limit = int(detail.get("player_limit", player_limit))
-	var lines: Array[String] = []
-	lines.append("[b]%s[/b]" % room_label)
-	lines.append("状态：%s" % state)
-	lines.append("玩家：%d/%d" % [players.size(), player_limit])
-	for player_data in players:
-		if typeof(player_data) != TYPE_DICTIONARY:
-			continue
-		var player_name: String = LobbyUtils.escape_bbcode(str(player_data.get("username", "未知")))
-		var role := "[b](房主)[/b] " if player_data.get("is_host", false) else ""
-		var ready_state: String = LobbyUtils.format_player_state(str(player_data.get("state", "")))
-		lines.append("%s%s [%s]" % [role, player_name, ready_state])
-	_room_detail_label.bbcode_text = "\n".join(lines)
+	if _room_view:
+		_room_view.refresh_room_view(_room_view_context())
 
 func _show_room_view() -> void:
 	if _login_container:
 		_login_container.visible = false
 	if _lobby_container:
 		_lobby_container.visible = false
-	if _room_view_container:
-		_room_view_container.visible = true
+	if _room_view:
+		_room_view.show()
 
 func _hide_room_view() -> void:
-	if _room_view_container:
-		_room_view_container.visible = false
+	if _room_view:
+		_room_view.hide()
 
 func _reset_room_view_controls() -> void:
-	if _room_view_title_label:
-		_room_view_title_label.text = "房间"
-	if _room_view_state_label:
-		_room_view_state_label.text = ""
-	if _room_view_status_label:
-		_room_view_status_label.text = ""
-		_room_view_status_label.modulate = Color(1, 1, 1)
-	if _room_view_players_list:
-		_room_view_players_list.clear()
-	if _room_view_ready_button:
-		_room_view_ready_button.disabled = true
-		_room_view_ready_button.text = "准备"
-	if _room_view_leave_button:
-		_room_view_leave_button.disabled = true
-	var default_limit: int = 0
-	if _room_view_config_limit:
-		_suppress_config_signal = true
-		default_limit = int(_room_view_config_limit.min_value)
-		if default_limit < 2:
-			default_limit = 2
-		_room_view_config_limit.value = default_limit
-		_suppress_config_signal = false
-		_room_view_config_limit.editable = false
-	else:
-		default_limit = 0
-	_current_room_config_limit = default_limit
-	if _room_view_config_apply_button:
-		_room_view_config_apply_button.disabled = true
-	if _room_view_config_hint:
-		_room_view_config_hint.text = "只有房主可以修改设置。"
-	_room_config_dirty = false
+	if _room_view:
+		_room_view.reset_controls()
 
-func _is_current_user_host(detail: Dictionary) -> bool:
-	return int(detail.get("host_id", -1)) == _user_id
+func _set_room_view_status(message: String, is_error: bool) -> void:
+	if _room_view:
+		_room_view.set_status(message, is_error)
 
-func _get_current_player_entry(detail: Dictionary) -> Dictionary:
-	var players: Variant = detail.get("players", [])
-	if typeof(players) != TYPE_ARRAY:
-		return {}
-	for entry in players:
-		if typeof(entry) != TYPE_DICTIONARY:
-			continue
-		if int(entry.get("user_id", -1)) == _user_id:
-			return entry
-	return {}
-
-func _format_room_player_entry(entry: Dictionary) -> String:
-	var name := str(entry.get("username", "玩家"))
-	var user_id := int(entry.get("user_id", -1))
-	var tags: Array[String] = []
-	if user_id == _user_id:
-		tags.append("你")
-	if entry.get("is_host", false):
-		tags.append("房主")
-	var prefix := ""
-	if !tags.is_empty():
-		prefix = "[%s] " % ",".join(tags)
-	var ready_state := LobbyUtils.format_player_state(str(entry.get("state", "")))
-	return "%s%s · %s" % [prefix, name, ready_state]
+func _in_room_view() -> bool:
+	return _room_view != null and _room_view.is_visible()
 
 func _format_room_label(room_id: int) -> String:
 	if room_id <= 0:
 		return "房间"
 	return "房间 %d" % room_id
-
-func _update_room_view(detail: Dictionary) -> void:
-	if _room_view_container == null:
-		return
-	if detail.is_empty():
-		_reset_room_view_controls()
-		return
-	var room_id := int(detail.get("id", -1))
-	var room_label := _format_room_label(room_id)
-	var state: String = LobbyUtils.format_room_state(str(detail.get("state", "")))
-	var players: Array = detail.get("players", [])
-	var limit := players.size()
-	var config: Variant = detail.get("config", null)
-	if typeof(config) == TYPE_DICTIONARY:
-		limit = int(config.get("player_limit", limit))
-	else:
-		limit = int(detail.get("player_limit", limit))
-	_current_room_config_limit = limit
-	if _room_view_title_label:
-		_room_view_title_label.text = room_label
-	if _room_view_state_label:
-		_room_view_state_label.text = "状态：%s    玩家：%d/%d" % [state, players.size(), limit]
-	if _room_view_players_list:
-		_room_view_players_list.clear()
-		for entry in players:
-			if typeof(entry) != TYPE_DICTIONARY:
-				continue
-			_room_view_players_list.add_item(_format_room_player_entry(entry))
-	var current_player := _get_current_player_entry(detail)
-	var current_state := str(current_player.get("state", "not_prepared"))
-	var room_state := str(detail.get("state", "waiting"))
-	var ready_text := "取消准备" if current_state == "prepared" else "准备"
-	var can_ready := !_mock_mode and room_state == "waiting" and !_room_ready_inflight and !current_player.is_empty()
-	if _room_view_ready_button:
-		_room_view_ready_button.text = ready_text
-		_room_view_ready_button.disabled = !can_ready
-	if _room_view_leave_button:
-		_room_view_leave_button.disabled = _room_leave_inflight or _mock_mode
-	var is_host := _is_current_user_host(detail)
-	var can_edit_config := is_host and !_mock_mode and !_room_config_inflight and room_state == "waiting"
-	if _room_view_config_limit:
-		_suppress_config_signal = true
-		_room_view_config_limit.value = limit
-		_suppress_config_signal = false
-		_room_view_config_limit.editable = can_edit_config
-		_room_config_dirty = false
-	if _room_view_config_apply_button:
-		var can_apply := can_edit_config and _room_config_dirty
-		_room_view_config_apply_button.disabled = !can_apply
-	if _room_view_config_hint:
-		_room_view_config_hint.text = "你是房主，可以调整设置。" if is_host else "只有房主可以修改设置。"
-
-func _set_room_view_status(message: String, is_error: bool) -> void:
-	if _room_view_status_label == null:
-		return
-	var color := Color(0.95, 0.54, 0.54) if is_error else Color(1, 1, 1)
-	_room_view_status_label.modulate = color
-	_room_view_status_label.text = message
-
-func _in_room_view() -> bool:
-	return _room_view_container != null and _room_view_container.visible
 
 
 func _set_lobby_status(message: String, is_error: bool) -> void:
@@ -1057,8 +906,8 @@ func _show_login_view() -> void:
 		_login_container.visible = true
 	if _lobby_container:
 		_lobby_container.visible = false
-	if _room_view_container:
-		_room_view_container.visible = false
+	if _room_view:
+		_room_view.hide()
 	if _generate_nickname_button:
 		_generate_nickname_button.disabled = false
 	if _nickname_input:
@@ -1071,9 +920,9 @@ func _show_lobby_view() -> void:
 		_login_container.visible = false
 	if _lobby_container:
 		_lobby_container.visible = true
-	if _room_view_container:
-		_room_view_container.visible = false
-	_render_room_summary(null)
+	if _room_view:
+		_room_view.hide()
+		_room_view.reset_summary()
 
 func _show_error(message: String) -> void:
 	if _error_dialog:
