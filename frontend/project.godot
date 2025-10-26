@@ -25,3 +25,7 @@ display/window/content_scale/base_size=Vector2i(1280, 720)
 [rendering]
 
 environment/default_environment="res://default_env.tres"
+
+[editor_plugins]
+
+enabled=PackedStringArray("gut")

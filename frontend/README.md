@@ -47,3 +47,9 @@ This is the Godot client for the Baodatui poker experience. It ships with a full
 - When adding new player-facing copy, confirm it renders in Simplified Chinese and fits existing layout constraints.
 - Leverage Godot’s live scene reload (`Ctrl` + `Shift` + `F5`) to test UI edits quickly, and use the built-in WebSocket debugger to trace traffic between the client and backend.
 - Before exporting builds, configure presets in **Project → Export**; the project currently inherits default Godot settings and does not ship platform-specific overrides.
+
+## Testing
+
+- GUT 9.5.0 ships under `addons/gut` and is pre-enabled in `project.godot`.
+- Place new test scripts in `res://test/`; see `test/test_home_page_end_to_end.gd` for an end-to-end example that drives the lobby UI.
+- Run the full suite from the editor’s **Test** panel or via CLI: `godot --headless --path frontend --script addons/gut/gut_cmdln.gd`.
