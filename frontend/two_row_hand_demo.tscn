@@ -1,0 +1,102 @@
+[gd_scene load_steps=6 format=3 uid="uid://trowhanddemo"]
+
+[ext_resource type="Script" path="res://scripts/two_row_hand_demo.gd" id="1_0h0v2"]
+[ext_resource type="PackedScene" path="res://addons/card-framework/card_manager.tscn" id="2_km4fu"]
+[ext_resource type="PackedScene" path="res://addons/card-framework/hand.tscn" id="3_57yro"]
+[ext_resource type="PackedScene" path="res://addons/card-framework/pile.tscn" id="4_yfu8v"]
+[ext_resource type="PackedScene" path="res://example_card_demo/card_demo_factory.tscn" id="5_8m8m1"]
+
+[node name="TwoRowHandDemo" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_0h0v2")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+color = Color(0.125, 0.141, 0.176, 1)
+
+[node name="HandArea" type="ColorRect" parent="."]
+layout_mode = 1
+anchor_left = 0.0
+anchor_right = 1.0
+anchor_top = 0.8
+anchor_bottom = 1.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 0.0
+offset_bottom = 0.0
+mouse_filter = 2
+color = Color(0.086, 0.094, 0.117, 1)
+
+[node name="CardManager" parent="." instance=ExtResource("2_km4fu")]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+card_factory_scene = ExtResource("5_8m8m1")
+
+[node name="Deck" parent="CardManager" instance=ExtResource("4_yfu8v")]
+layout_mode = 0
+anchor_left = 0.05
+anchor_right = 0.05
+anchor_top = 0.08
+anchor_bottom = 0.08
+offset_left = -96.0
+offset_top = -64.0
+offset_right = 96.0
+offset_bottom = 64.0
+card_face_up = false
+
+[node name="PlayerHandTop" parent="CardManager" instance=ExtResource("3_57yro")]
+layout_mode = 0
+anchor_left = 0.05
+anchor_right = 0.95
+anchor_top = 0.82
+anchor_bottom = 0.9
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 0.0
+offset_bottom = 0.0
+
+[node name="PlayerHandBottom" parent="CardManager" instance=ExtResource("3_57yro")]
+layout_mode = 0
+anchor_left = 0.05
+anchor_right = 0.95
+anchor_top = 0.9
+anchor_bottom = 0.98
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 0.0
+offset_bottom = 0.0
+
+[node name="HandLabelTop" type="Label" parent="."]
+layout_mode = 1
+anchor_left = 0.05
+anchor_top = 0.78
+anchor_right = 0.05
+anchor_bottom = 0.78
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 200.0
+offset_bottom = 32.0
+text = "Top Row"
+horizontal_alignment = 1
+
+[node name="HandLabelBottom" type="Label" parent="."]
+layout_mode = 1
+anchor_left = 0.05
+anchor_top = 0.88
+anchor_right = 0.05
+anchor_bottom = 0.88
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 200.0
+offset_bottom = 32.0
+text = "Bottom Row"
+horizontal_alignment = 1
